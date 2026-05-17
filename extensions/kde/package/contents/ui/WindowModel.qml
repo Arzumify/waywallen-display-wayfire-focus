@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
+// Dumb window-state reporter. Aggregates the current screen's covering
+// windows into the `WW_WIN_HAS_*` bitmask that the daemon translates
+// into autopause. No mode, no debounce — daemon owns all policy.
+//
+// Bit layout matches WAYWALLEN_WIN_HAS_* in waywallen_display.h:
+//   bit 0  NON_MINIMIZED
+//   bit 1  ACTIVE
+//   bit 2  MAXIMIZED   (not counting fullscreen)
+//   bit 3  FULLSCREEN
+
+import QtQuick
+import org.kde.taskmanager 0.1 as TaskManager
+
+Item {
+    id: wm
+
+    // Wallpaper-local rect (set by parent). Drives `filterByScreen`
+    // semantics — only windows whose centroid lies inside this rect
+    // are counted.
+    property var screenGeometry
+
+    readonly property int flags: _flags
+    property int _flags: 0
+
+    TaskManager.ActivityInfo { id: activityInfo }
+    TaskManager.VirtualDesktopInfo { id: vdInfo }
+
+    TaskManager.TasksModel {
+        id: tasksModel
+        sortMode:               TaskManager.TasksModel.SortVirtualDesktop
+        groupMode:              TaskManager.TasksModel.GroupDisabled
+        filterByVirtualDesktop: true
+        virtualDesktop:         vdInfo.currentDesktop
+        filterByScreen:         true
+        screenGeometry:         wm.screenGeometry
+
+        onActiveTaskChanged: wm.recompute()
+        onDataChanged:       wm.recompute()
+        onCountChanged:      wm.recompute()
+    }
+
+    Component.onCompleted: recompute()
+    onScreenGeometryChanged: recompute()
+
+    function _role(idx, name) {
+        return tasksModel.data(idx, TaskManager.AbstractTasksModel[name]);
+    }
+
+    function recompute() {
+        let f = 0;
+        const act = activityInfo.currentActivity;
+        for (let i = 0; i < tasksModel.count; i++) {
+            const idx = tasksModel.makeModelIndex(i);
+            if (_role(idx, "IsWindow") !== true)        continue;
+            // Mirror old WindowModel.qml's activity scoping: drop
+            // windows that explicitly list activities AND don't
+            // include the current one. Windows with no activity list
+            // are taken as "on every activity" and counted.
+            const acts = _role(idx, "Activities");
+            if (acts && acts.length && acts.indexOf(act) === -1) continue;
+            if (_role(idx, "IsMinimized") === true)     continue;
+            f |= 1; // NON_MINIMIZED
+            if (_role(idx, "IsActive") === true)        f |= 2; // ACTIVE
+            if (_role(idx, "IsFullScreen") === true) {
+                f |= 8; // FULLSCREEN
+            } else if (_role(idx, "IsMaximized") === true) {
+                f |= 4; // MAXIMIZED
+            }
+        }
+        if (f !== _flags) _flags = f;
+    }
+}

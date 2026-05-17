@@ -56,6 +56,12 @@ class WaywallenDisplay : public QQuickItem {
     Q_PROPERTY(bool mouseForwardEnabled READ mouseForwardEnabled
                    WRITE setMouseForwardEnabled
                    NOTIFY mouseForwardEnabledChanged)
+    // Bitmask of WAYWALLEN_WIN_HAS_* describing the windows that
+    // currently cover this display. Pushed to the daemon as a
+    // `window_state` request; the daemon owns the autopause policy.
+    Q_PROPERTY(quint32 windowStateFlags READ windowStateFlags
+                   WRITE setWindowStateFlags
+                   NOTIFY windowStateFlagsChanged)
 
 public:
     enum ConnState {
@@ -123,6 +129,9 @@ public:
     bool mouseForwardEnabled() const { return m_mouseForwardEnabled; }
     void setMouseForwardEnabled(bool enabled);
 
+    quint32 windowStateFlags() const { return m_windowStateFlags; }
+    void setWindowStateFlags(quint32 flags);
+
     // Attempt to connect now. No-op when already Connected. Triggered
     // automatically by the DBus NameOwnerChanged / Daemon Ready signals
     // (see setupDBusWatcher); also exposed for tests and manual cues.
@@ -153,6 +162,7 @@ signals:
     void clearColorChanged();
     void autoReconnectChanged();
     void mouseForwardEnabledChanged();
+    void windowStateFlagsChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *oldNode,
@@ -220,6 +230,12 @@ private:
     bool m_autoReconnect { true };
     bool m_mouseForwardEnabled { true };
     bool m_filterInstalled { false };
+    // Latest QML-supplied flags. Echoed to the daemon when the
+    // connection is up; held until then so the post-handshake state
+    // matches whatever the WindowModel last computed (replayed from
+    // setConnState(Connected)).
+    quint32 m_windowStateFlags { 0 };
+    bool    m_windowStateFlagsDirty { false };
 
     // C library handle.
     waywallen_display_t *m_display { nullptr };

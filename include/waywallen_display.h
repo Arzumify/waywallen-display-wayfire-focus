@@ -55,7 +55,7 @@ extern "C" {
  * `hello.client_protocol_version`. The daemon owns the supported
  * range and rejects out-of-range clients with `error{code=2}`.
  */
-#define WAYWALLEN_DISPLAY_PROTOCOL_VERSION 6
+#define WAYWALLEN_DISPLAY_PROTOCOL_VERSION 7
 
 /*
  * Library version baked in at build time.
@@ -400,6 +400,33 @@ int waywallen_display_connect(waywallen_display_t *d,
 int waywallen_display_update_size(waywallen_display_t *d,
                                   uint32_t width,
                                   uint32_t height);
+
+/*
+ * `flags` bitmask passed to `waywallen_display_set_window_state`.
+ * Mirrors `WW_WIN_HAS_*` in waywallen-display-v1.xml (opcode 12).
+ */
+#define WAYWALLEN_WIN_HAS_NON_MINIMIZED (1u << 0)
+#define WAYWALLEN_WIN_HAS_ACTIVE        (1u << 1)
+#define WAYWALLEN_WIN_HAS_MAXIMIZED     (1u << 2)
+#define WAYWALLEN_WIN_HAS_FULLSCREEN    (1u << 3)
+
+/*
+ * Report which kinds of windows currently cover this display. The
+ * daemon translates (flags, per-display AutopauseMode) into renderer
+ * Pause/Play. Fire-and-forget — consumers MUST NOT debounce or
+ * filter; the daemon owns all policy.
+ *
+ * Coalesced: if the outbox tail still holds an unsent prior
+ * `window_state`, the new `flags` overwrite its body in place, so a
+ * burst of rapid toggles never lands as a queue of stale snapshots.
+ *
+ * Returns OK on enqueue, ERR_STATE if not yet Connected (caller
+ * should retry after handshake completion). The library does not
+ * itself remember the last value across reconnects — the host is
+ * expected to re-send after a reconnect if it cares.
+ */
+int waywallen_display_set_window_state(waywallen_display_t *d,
+                                       uint32_t flags);
 
 /*
  * Read-side fd for poll(2) integration. Returns -1 if the display is

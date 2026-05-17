@@ -9,6 +9,7 @@ WW.WaywallenDisplay {
     property int    displayWidthBinding
     property int    displayHeightBinding
     property bool   mouseForwardBinding: true
+    property int    windowStateFlagsBinding: 0
 
     displayName:         displayNameBinding
     instanceId:          instanceIdBinding
@@ -16,6 +17,7 @@ WW.WaywallenDisplay {
     displayWidth:        displayWidthBinding
     displayHeight:       displayHeightBinding
     mouseForwardEnabled: mouseForwardBinding
+    windowStateFlags:    windowStateFlagsBinding
 
     signal firstFrameSeen()
 

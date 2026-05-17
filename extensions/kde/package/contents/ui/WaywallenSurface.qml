@@ -16,6 +16,7 @@ WW.WaywallenDisplay {
     property int    displayWidthBinding
     property int    displayHeightBinding
     property bool   mouseForwardBinding: true
+    property int    windowStateFlagsBinding: 0
 
     // `clearColor` is owned by the renderer; the QML module reads it
     // from the daemon's `set_config` and applies it internally. KDE's
@@ -26,6 +27,7 @@ WW.WaywallenDisplay {
     displayWidth:        displayWidthBinding
     displayHeight:       displayHeightBinding
     mouseForwardEnabled: mouseForwardBinding
+    windowStateFlags:    windowStateFlagsBinding
 
     signal firstFrameSeen()
 

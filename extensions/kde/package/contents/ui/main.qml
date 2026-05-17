@@ -56,6 +56,18 @@ WallpaperItem {
 
     property bool _initDone: false
 
+    // Per-display window-state reporter. We aggregate the current
+    // screen's covering windows into a bitmask and push it down to
+    // the daemon via WaywallenDisplay.windowStateFlags. The daemon
+    // owns the autopause policy; this side only reports raw facts.
+    WindowModel {
+        id: windowModel
+        // `parent` here is the WallpaperItem; its (x, y, width,
+        // height) lie in the same root coords TasksModel needs for
+        // filterByScreen.
+        screenGeometry: Qt.rect(root.x, root.y, root.width, root.height)
+    }
+
     Loader {
         id: surfaceLoader
         anchors.fill: parent
@@ -64,14 +76,15 @@ WallpaperItem {
         source: root.surfaceSource
 
         onLoaded: {
-            item.displayNameBinding    = Qt.binding(() =>
+            item.displayNameBinding        = Qt.binding(() =>
                 root.configuration.DisplayName.length > 0
                     ? root.configuration.DisplayName
                     : root.defaultDisplayName);
-            item.instanceIdBinding     = Qt.binding(() => root.configuration.DisplayInstanceId);
-            item.displayWidthBinding   = Qt.binding(() => Math.round(root.width  * Screen.devicePixelRatio));
-            item.displayHeightBinding  = Qt.binding(() => Math.round(root.height * Screen.devicePixelRatio));
-            item.mouseForwardBinding   = Qt.binding(() => root.configuration.MouseForward);
+            item.instanceIdBinding         = Qt.binding(() => root.configuration.DisplayInstanceId);
+            item.displayWidthBinding       = Qt.binding(() => Math.round(root.width  * Screen.devicePixelRatio));
+            item.displayHeightBinding      = Qt.binding(() => Math.round(root.height * Screen.devicePixelRatio));
+            item.mouseForwardBinding       = Qt.binding(() => root.configuration.MouseForward);
+            item.windowStateFlagsBinding   = Qt.binding(() => windowModel.flags);
         }
     }
 

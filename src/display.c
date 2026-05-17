@@ -1319,6 +1319,35 @@ int waywallen_display_update_size(waywallen_display_t *d,
     return outbox_enqueue_request(d, WW_REQ_UPDATE_DISPLAY, enc_update, &upd);
 }
 
+static int enc_window_state(const void *m, ww_buf_t *out) {
+    return ww_req_window_state_encode((const ww_req_window_state_t *)m, out);
+}
+
+int waywallen_display_set_window_state(waywallen_display_t *d, uint32_t flags) {
+    if (!d) return WAYWALLEN_ERR_INVAL;
+    if (d->conn != WW_CONN_CONNECTED) return WAYWALLEN_ERR_STATE;
+    /* Outbox-tail coalesce. window_state's wire frame is fixed: 4-byte
+     * header + 4-byte u32 body = 8 bytes. If the most recent unsent
+     * entry is also a window_state, overwrite its body in place — a
+     * stale snapshot must never land behind a fresh one. */
+    if (d->out_len >= d->out_pos + 8) {
+        uint8_t *tail = d->out_buf + d->out_len - 8;
+        uint16_t op  = (uint16_t)((uint16_t)tail[0] | ((uint16_t)tail[1] << 8));
+        uint16_t len = (uint16_t)((uint16_t)tail[2] | ((uint16_t)tail[3] << 8));
+        if (op == WW_REQ_WINDOW_STATE && len == 8) {
+            tail[4] = (uint8_t)(flags & 0xff);
+            tail[5] = (uint8_t)((flags >> 8) & 0xff);
+            tail[6] = (uint8_t)((flags >> 16) & 0xff);
+            tail[7] = (uint8_t)((flags >> 24) & 0xff);
+            (void)outbox_flush_one(d);
+            return WAYWALLEN_OK;
+        }
+    }
+    ww_req_window_state_t msg;
+    msg.flags = flags;
+    return outbox_enqueue_request(d, WW_REQ_WINDOW_STATE, enc_window_state, &msg);
+}
+
 static int enc_pointer_motion(const void *m, ww_buf_t *out) {
     return ww_req_pointer_motion_encode((const ww_req_pointer_motion_t *)m, out);
 }

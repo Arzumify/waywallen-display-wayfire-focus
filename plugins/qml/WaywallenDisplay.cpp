@@ -550,6 +550,39 @@ void WaywallenDisplay::setConnState(ConnState s) {
     if (m_connState == s) return;
     m_connState = s;
     emit connStateChanged();
+    // Re-send any post-handshake state that's only valid against a
+    // Connected daemon: window_state (autopause reporter) carries the
+    // most recent QML-visible bitmask, which the lib does not
+    // remember across reconnects.
+    if (s == Connected && m_display && m_windowStateFlagsDirty) {
+        if (waywallen_display_set_window_state(m_display, m_windowStateFlags)
+            == WAYWALLEN_OK) {
+            m_windowStateFlagsDirty = false;
+            armWriteNotifier();
+        }
+    }
+}
+
+void WaywallenDisplay::setWindowStateFlags(quint32 flags) {
+    // Always emit the change signal so QML bindings track the
+    // property; the daemon push is best-effort and gated on
+    // Connected.
+    const bool changed = m_windowStateFlags != flags;
+    m_windowStateFlags = flags;
+    if (m_connState == Connected && m_display) {
+        if (waywallen_display_set_window_state(m_display, flags) == WAYWALLEN_OK) {
+            m_windowStateFlagsDirty = false;
+            armWriteNotifier();
+        } else {
+            // Lib returned ERR_STATE / NOMEM. Mark dirty so we retry
+            // on the next reconnect or external poke; armWriteNotifier
+            // would be a no-op anyway with nothing queued.
+            m_windowStateFlagsDirty = true;
+        }
+    } else {
+        m_windowStateFlagsDirty = true;
+    }
+    if (changed) emit windowStateFlagsChanged();
 }
 
 void WaywallenDisplay::setStreamState(StreamState s) {
