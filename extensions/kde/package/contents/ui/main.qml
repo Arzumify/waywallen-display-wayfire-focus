@@ -140,14 +140,100 @@ WallpaperItem {
     Loader {
         anchors { top: parent.top; left: parent.left; margins: 12 }
         active: root.configuration.ShowDiagnostics && surfaceLoader.status === Loader.Ready
-        sourceComponent: Text {
-            color: "white"
-            style: Text.Outline
-            styleColor: "black"
-            font.pixelSize: 14
-            text: "waywallen: conn=" + surfaceLoader.item.connState
-                  + " stream=" + surfaceLoader.item.streamState
-                  + " frames=" + surfaceLoader.item.framesReceived
+        sourceComponent: Rectangle {
+            id: diagBox
+            width:  diagText.implicitWidth + 16
+            height: diagText.implicitHeight + 12
+            color: Qt.rgba(0, 0, 0, 0.55)
+            radius: 6
+
+            readonly property var display: surfaceLoader.item
+
+            Text {
+                id: diagText
+                x: 8; y: 6
+                color: "#cdd6f4"
+                font.pixelSize: 13
+                font.family: "monospace"
+                text: {
+                    const d = diagBox.display;
+                    let s = "name:   " + d.displayName
+                    s += "  id: " + (d.displayId === 0 ? "—" : d.displayId)
+                    s += "\nscreen: " + Screen.name + screenVendor()
+                    s += "\n  geom:  " + Screen.width + "x" + Screen.height
+                          + " @ (" + Screen.virtualX + "," + Screen.virtualY + ")"
+                    s += "\n  avail: " + Screen.desktopAvailableWidth
+                          + "x" + Screen.desktopAvailableHeight
+                    s += "\n  dpr=" + Screen.devicePixelRatio
+                          + "  density=" + Screen.pixelDensity.toFixed(2) + " px/mm"
+                    s += "\n  orient: " + orientText(Screen.orientation)
+                    s += "\nconn:   " + connText(d.connState)
+                          + "  stream: " + streamText(d.streamState)
+                    s += "\nframes: " + d.framesReceived
+                    s += "\nclear:  " + d.clearColor.toString()
+                    if (d.lastDisconnectReason !== 0) {
+                        s += "\nreason: " + reasonText(d.lastDisconnectReason)
+                        if (d.lastDisconnectMessage.length > 0)
+                            s += "\n  msg:  " + d.lastDisconnectMessage
+                    }
+                    return s
+                }
+
+                // Enum values mirror WaywallenDisplay::DisconnectReason in
+                // plugins/qml/WaywallenDisplay.hpp.
+                function reasonText(r) {
+                    switch (r) {
+                    case 0: return "—"
+                    case 1: return "version unsupported"
+                    case 2: return "protocol mismatch"
+                    case 3: return "daemon error"
+                    case 4: return "handshake failed"
+                    case 5: return "socket io"
+                    case 6: return "protocol error"
+                    case 7: return "daemon gone"
+                    }
+                    return "unknown"
+                }
+
+                function screenVendor() {
+                    const m = (Screen.manufacturer || "").trim()
+                    const x = (Screen.model || "").trim()
+                    if (!m && !x) return ""
+                    return " [" + [m, x].filter(s => s.length > 0).join(" ") + "]"
+                }
+
+                // Mirrors WaywallenDisplay::ConnState.
+                function connText(st) {
+                    switch (st) {
+                    case 0: return "disconnected"
+                    case 1: return "connecting…"
+                    case 2: return "handshaking…"
+                    case 3: return "connected"
+                    case 4: return "error"
+                    }
+                    return "unknown"
+                }
+
+                // Mirrors WaywallenDisplay::StreamState.
+                function streamText(st) {
+                    switch (st) {
+                    case 0: return "inactive"
+                    case 1: return "active"
+                    }
+                    return "unknown"
+                }
+
+                function orientText(o) {
+                    switch (o) {
+                    case Qt.PrimaryOrientation:           return "primary"
+                    case Qt.PortraitOrientation:          return "portrait"
+                    case Qt.LandscapeOrientation:         return "landscape"
+                    case Qt.InvertedPortraitOrientation:  return "portrait (inv)"
+                    case Qt.InvertedLandscapeOrientation: return "landscape (inv)"
+                    }
+                    return "?"
+                }
+            }
         }
     }
 
