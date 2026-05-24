@@ -62,10 +62,14 @@ WallpaperItem {
     // owns the autopause policy; this side only reports raw facts.
     WindowModel {
         id: windowModel
-        // `parent` here is the WallpaperItem; its (x, y, width,
-        // height) lie in the same root coords TasksModel needs for
-        // filterByScreen.
-        screenGeometry: Qt.rect(root.x, root.y, root.width, root.height)
+        // TasksModel.filterByScreen expects geometry in the compositor's
+        // global virtual-desktop coords. WallpaperItem's own x/y are local
+        // to its containment parent — both screens report (0, 0) there, so
+        // every wallpaper instance ends up matching the same set of windows.
+        // Screen.virtualX/Y is the per-screen global origin, which is what
+        // makes the per-display filter actually differentiate.
+        screenGeometry: Qt.rect(Screen.virtualX, Screen.virtualY,
+                                Screen.width, Screen.height)
     }
 
     Loader {
@@ -172,12 +176,52 @@ WallpaperItem {
                           + "  stream: " + streamText(d.streamState)
                     s += "\nframes: " + d.framesReceived
                     s += "\nclear:  " + d.clearColor.toString()
+                    s += "\nwindows: " + windowsText()
                     if (d.lastDisconnectReason !== 0) {
                         s += "\nreason: " + reasonText(d.lastDisconnectReason)
                         if (d.lastDisconnectMessage.length > 0)
                             s += "\n  msg:  " + d.lastDisconnectMessage
                     }
                     return s
+                }
+
+                // Renders the same screen-filtered window list that drives
+                // the autopause bitmask, so the displayed state and the
+                // reported flags can be cross-checked at a glance.
+                function windowsText() {
+                    const f = windowModel.flags;
+                    const ws = windowModel.windows;
+                    let s = ws.length + " flags=0x" + f.toString(16)
+                          + " [" + flagsBits(f) + "]"
+                    if (ws.length === 0) return s
+                    for (let i = 0; i < ws.length; i++) {
+                        const w = ws[i]
+                        const label = (w.app && w.app.length > 0)
+                            ? w.app + " — " + w.title
+                            : w.title
+                        s += "\n  [" + winTag(w) + "] " + (label || "(untitled)")
+                    }
+                    return s
+                }
+
+                // Bit layout mirrors WAYWALLEN_WIN_HAS_* in
+                // waywallen_display.h (see WindowModel.qml).
+                function flagsBits(f) {
+                    if (f === 0) return "—"
+                    const names = []
+                    if (f & 1) names.push("nonmin")
+                    if (f & 2) names.push("active")
+                    if (f & 4) names.push("max")
+                    if (f & 8) names.push("full")
+                    return names.join("+")
+                }
+
+                function winTag(w) {
+                    let t = ""
+                    t += w.minimized  ? "m" : "-"
+                    t += w.active     ? "A" : "-"
+                    t += w.fullscreen ? "F" : (w.maximized ? "M" : "-")
+                    return t
                 }
 
                 // Enum values mirror WaywallenDisplay::DisconnectReason in

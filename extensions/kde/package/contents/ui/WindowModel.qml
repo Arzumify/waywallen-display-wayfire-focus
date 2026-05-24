@@ -24,6 +24,12 @@ Item {
     readonly property int flags: _flags
     property int _flags: 0
 
+    // Debug-only snapshot of the windows that survived activity /
+    // virtual-desktop / screen filtering. Consumed by the ShowDiagnostics
+    // overlay; the daemon never sees this — it only gets the bitmask.
+    readonly property var windows: _windows
+    property var _windows: []
+
     TaskManager.ActivityInfo { id: activityInfo }
     TaskManager.VirtualDesktopInfo { id: vdInfo }
 
@@ -50,6 +56,7 @@ Item {
 
     function recompute() {
         let f = 0;
+        const list = [];
         const act = activityInfo.currentActivity;
         for (let i = 0; i < tasksModel.count; i++) {
             const idx = tasksModel.makeModelIndex(i);
@@ -60,15 +67,28 @@ Item {
             // are taken as "on every activity" and counted.
             const acts = _role(idx, "Activities");
             if (acts && acts.length && acts.indexOf(act) === -1) continue;
-            if (_role(idx, "IsMinimized") === true)     continue;
+            const isMin  = _role(idx, "IsMinimized")  === true;
+            const isAct  = _role(idx, "IsActive")     === true;
+            const isFull = _role(idx, "IsFullScreen") === true;
+            const isMax  = _role(idx, "IsMaximized")  === true;
+            list.push({
+                title:      tasksModel.data(idx, 0) || "",  // Qt::DisplayRole
+                app:        _role(idx, "AppName")   || "",
+                minimized:  isMin,
+                active:     isAct,
+                maximized:  isMax,
+                fullscreen: isFull,
+            });
+            if (isMin) continue;
             f |= 1; // NON_MINIMIZED
-            if (_role(idx, "IsActive") === true)        f |= 2; // ACTIVE
-            if (_role(idx, "IsFullScreen") === true) {
+            if (isAct)  f |= 2; // ACTIVE
+            if (isFull) {
                 f |= 8; // FULLSCREEN
-            } else if (_role(idx, "IsMaximized") === true) {
+            } else if (isMax) {
                 f |= 4; // MAXIMIZED
             }
         }
         if (f !== _flags) _flags = f;
+        _windows = list;
     }
 }
