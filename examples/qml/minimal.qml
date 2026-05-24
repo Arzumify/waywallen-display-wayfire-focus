@@ -51,6 +51,9 @@ Window {
                 s += "  id: " + (wallpaper.displayId === 0
                                      ? "—"
                                      : wallpaper.displayId)
+                s += "\ninst:   " + (wallpaper.instanceId.length > 0
+                                         ? wallpaper.instanceId
+                                         : "—")
                 s += "\nscreen: " + Screen.name + screenVendor()
                 s += "\n  geom:  " + Screen.width + "x" + Screen.height
                       + " @ (" + Screen.virtualX + "," + Screen.virtualY + ")"

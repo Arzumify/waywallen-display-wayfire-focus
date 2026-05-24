@@ -159,6 +159,7 @@ WallpaperItem {
                     const d = diagBox.display;
                     let s = "name:   " + d.displayName
                     s += "  id: " + (d.displayId === 0 ? "—" : d.displayId)
+                    s += "\ninst:   " + (d.instanceId.length > 0 ? d.instanceId : "—")
                     s += "\nscreen: " + Screen.name + screenVendor()
                     s += "\n  geom:  " + Screen.width + "x" + Screen.height
                           + " @ (" + Screen.virtualX + "," + Screen.virtualY + ")"
