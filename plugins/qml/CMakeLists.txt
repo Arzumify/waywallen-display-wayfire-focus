@@ -15,8 +15,18 @@ find_package(Vulkan QUIET)
 # The C display library lives two levels up.
 set(WAYWALLEN_DISPLAY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
+# CI builds the KDE kpackage with an alt URI so it doesn't collide with
+# a user's separately-installed Waywallen.Display module — Qt protects
+# a module URI after its first type registration, so two .so files
+# claiming the same URI fail with "Cannot install element ... into
+# protected module ...". Distro builds keep the default.
+set(WAYWALLEN_DISPLAY_QML_URI "Waywallen.Display"
+    CACHE STRING "QML module URI for the WaywallenDisplay plugin")
+
+string(REPLACE "." "/" _ww_qml_uri_path "${WAYWALLEN_DISPLAY_QML_URI}")
+
 qt_add_qml_module(waywallen-display-qml
-    URI Waywallen.Display
+    URI ${WAYWALLEN_DISPLAY_QML_URI}
     VERSION 1.0
     PLUGIN_TARGET waywallen-display-qml
     SOURCES
@@ -24,7 +34,7 @@ qt_add_qml_module(waywallen-display-qml
         WaywallenDisplay.cpp
         PluginInfo.hpp
     OUTPUT_DIRECTORY
-        ${CMAKE_CURRENT_BINARY_DIR}/Waywallen/Display
+        ${CMAKE_CURRENT_BINARY_DIR}/${_ww_qml_uri_path}
 )
 
 if(Vulkan_FOUND)
@@ -64,14 +74,14 @@ set(QML_INSTALL_DIR "${CMAKE_INSTALL_FULL_LIBDIR}/qt6/qml"
     CACHE PATH "QML plugin install directory")
 
 install(
-    DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/Waywallen/
-    DESTINATION ${QML_INSTALL_DIR}/Waywallen)
+    DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${_ww_qml_uri_path}/
+    DESTINATION ${QML_INSTALL_DIR}/${_ww_qml_uri_path})
 
 # Embed the QML module into the KDE kpackage layout for the kde_extension
 # CPack component. EXCLUDE_FROM_ALL keeps a normal `cmake --install` to the
 # system prefix from also writing this kpackage-shaped path.
 install(
-    DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/Waywallen/Display/
+    DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${_ww_qml_uri_path}/
     DESTINATION org.waywallen.kde/contents/ui/WaywallenDisplayEmbed
     COMPONENT kde_extension
     EXCLUDE_FROM_ALL)

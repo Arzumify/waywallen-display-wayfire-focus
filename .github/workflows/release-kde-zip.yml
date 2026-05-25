@@ -26,7 +26,8 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DWAYWALLEN_DISPLAY_PLUGIN_QML=ON
+            -DWAYWALLEN_DISPLAY_PLUGIN_QML=ON \
+            -DWAYWALLEN_DISPLAY_QML_URI=Waywallen.DisplayEmbed
 
       - name: Build KDE wallpaper zip
         run: cmake --build build --target package
