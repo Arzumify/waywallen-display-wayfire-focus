@@ -50,7 +50,7 @@
 
 /* Keep in sync with the project() VERSION in the top-level CMakeLists.txt. */
 waywallen_display_version_t waywallen_display_version(void) {
-    return (waywallen_display_version_t){ .major = 0, .minor = 2, .patch = 1 };
+    return (waywallen_display_version_t){ .major = 0, .minor = 2, .patch = 2 };
 }
 
 /* ------------------------------------------------------------------ */
@@ -979,9 +979,13 @@ static int hs_queue_request(waywallen_display_t *d, uint16_t opcode,
 static int hs_queue_hello(waywallen_display_t *d) {
     ww_req_hello_t hello;
     memset(&hello, 0, sizeof(hello));
+    waywallen_display_version_t v = waywallen_display_version();
+    char version_buf[32];
+    snprintf(version_buf, sizeof(version_buf), "%u.%u.%u",
+             v.major, v.minor, v.patch);
     hello.protocol = (char *)WW_PROTOCOL_NAME;
     hello.client_name = (char *)"libwaywallen_display";
-    hello.client_version = (char *)"0.1.0";
+    hello.client_version = version_buf;
     hello.client_protocol_version = WAYWALLEN_DISPLAY_PROTOCOL_VERSION;
     return hs_queue_request(d, WW_REQ_HELLO, enc_hello, &hello);
 }
