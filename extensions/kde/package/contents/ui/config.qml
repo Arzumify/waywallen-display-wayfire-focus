@@ -112,6 +112,31 @@ ColumnLayout {
         }
     }
 
+    Kirigami.InlineMessage {
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.largeSpacing
+        Layout.rightMargin: Kirigami.Units.largeSpacing
+        visible: true
+        type: Kirigami.MessageType.Information
+        text: i18nd("plasma_wallpaper_org.waywallen.kde",
+                    "After upgrading the plugin, restart plasmashell to pick up the new QML module:<br/>" +
+                    "<code>systemctl --user restart plasma-plasmashell.service</code>")
+    }
+
+    Kirigami.InlineMessage {
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.largeSpacing
+        Layout.rightMargin: Kirigami.Units.largeSpacing
+        visible: Qt.platform.pluginName === "xcb"
+        type: Kirigami.MessageType.Information
+        text: i18nd("plasma_wallpaper_org.waywallen.kde",
+                    "On X11 sessions (e.g. Steam Deck), plasmashell needs the EGL XCB backend " +
+                    "to import the wallpaper's DMA-BUFs. Create " +
+                    "<code>~/.config/systemd/user/plasma-plasmashell.service.d/override.conf</code> with:<br/>" +
+                    "<pre>[Service]\nEnvironment=QT_XCB_GL_INTEGRATION=xcb_egl</pre>" +
+                    "then run <code>systemctl --user daemon-reload</code> and restart plasmashell.")
+    }
+
     // Spacer pushes the error block down and keeps the form anchored to
     // the top regardless of how the surrounding config view sizes us.
     Item {

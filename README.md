@@ -36,6 +36,22 @@ kpackagetool6 --type Plasma/Wallpaper -i waywallen-kde-<version>-<arch>.zip
 > systemctl --user restart plasma-plasmashell.service
 > ```
 
+> [!TIP]
+> On X11(like steamdeck), plasmashell needs the EGL XCB backend, Add a systemd user drop-in at
+> `~/.config/systemd/user/plasma-plasmashell.service.d/override.conf`:
+> 
+> ```ini
+> [Service]
+> Environment=QT_XCB_GL_INTEGRATION=xcb_egl
+> ```
+> 
+> Then reload and restart:
+> 
+> ```sh
+> systemctl --user daemon-reload
+> systemctl --user restart plasma-plasmashell.service
+> ```
+
 ## Extensions
 
 | Extension | Notes |
