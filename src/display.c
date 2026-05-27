@@ -48,9 +48,12 @@
 /*  Library version                                                    */
 /* ------------------------------------------------------------------ */
 
-/* Keep in sync with the project() VERSION in the top-level CMakeLists.txt. */
 waywallen_display_version_t waywallen_display_version(void) {
-    return (waywallen_display_version_t){ .major = 0, .minor = 2, .patch = 2 };
+    return (waywallen_display_version_t){
+        .major = WAYWALLEN_DISPLAY_VERSION_MAJOR,
+        .minor = WAYWALLEN_DISPLAY_VERSION_MINOR,
+        .patch = WAYWALLEN_DISPLAY_VERSION_PATCH,
+    };
 }
 
 /* ------------------------------------------------------------------ */

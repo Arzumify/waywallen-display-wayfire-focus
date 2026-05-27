@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
+
+set(WAYWALLEN_DISPLAY_VERSION_MAJOR 0)
+set(WAYWALLEN_DISPLAY_VERSION_MINOR 2)
+set(WAYWALLEN_DISPLAY_VERSION_PATCH 3)
+
 project(waywallen_display
-    VERSION 0.2.2
+    VERSION ${WAYWALLEN_DISPLAY_VERSION_MAJOR}.${WAYWALLEN_DISPLAY_VERSION_MINOR}.${WAYWALLEN_DISPLAY_VERSION_PATCH}
     LANGUAGES C
     DESCRIPTION "C library for the waywallen-display-v1 protocol")
 
@@ -192,7 +197,11 @@ target_compile_options(waywallen_display PRIVATE
     -Wconversion
     -Wsign-conversion)
 
-target_compile_definitions(waywallen_display PRIVATE ${_backend_defines})
+target_compile_definitions(waywallen_display PRIVATE
+    ${_backend_defines}
+    WAYWALLEN_DISPLAY_VERSION_MAJOR=${WAYWALLEN_DISPLAY_VERSION_MAJOR}
+    WAYWALLEN_DISPLAY_VERSION_MINOR=${WAYWALLEN_DISPLAY_VERSION_MINOR}
+    WAYWALLEN_DISPLAY_VERSION_PATCH=${WAYWALLEN_DISPLAY_VERSION_PATCH})
 if(_backend_private_libs)
     target_link_libraries(waywallen_display PRIVATE ${_backend_private_libs})
 endif()
@@ -224,7 +233,11 @@ target_compile_options(waywallen_display_static PRIVATE
     PUBLIC
     -include ${CMAKE_CURRENT_SOURCE_DIR}/glibc-2.17.h
     )
-target_compile_definitions(waywallen_display_static PRIVATE ${_backend_defines})
+target_compile_definitions(waywallen_display_static PRIVATE
+    ${_backend_defines}
+    WAYWALLEN_DISPLAY_VERSION_MAJOR=${WAYWALLEN_DISPLAY_VERSION_MAJOR}
+    WAYWALLEN_DISPLAY_VERSION_MINOR=${WAYWALLEN_DISPLAY_VERSION_MINOR}
+    WAYWALLEN_DISPLAY_VERSION_PATCH=${WAYWALLEN_DISPLAY_VERSION_PATCH})
 if(_backend_private_libs)
     target_link_libraries(waywallen_display_static PUBLIC ${_backend_private_libs})
 endif()
