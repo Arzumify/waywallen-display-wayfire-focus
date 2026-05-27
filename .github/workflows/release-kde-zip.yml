@@ -22,15 +22,8 @@ jobs:
             qt6-base-dev qt6-declarative-dev \
             libegl-dev libgles-dev libvulkan-dev
 
-      - name: Configure
-        run: |
-          cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DWAYWALLEN_DISPLAY_PLUGIN_QML=ON \
-            -DWAYWALLEN_DISPLAY_QML_URI=Waywallen.DisplayEmbed
-
-      - name: Build KDE wallpaper zip
-        run: cmake --build build --target package
+      - name: Build KDE wallpaper zip (embedded module)
+        run: ./scripts/build_kde_embed.sh
 
       - name: Locate zip
         id: zip

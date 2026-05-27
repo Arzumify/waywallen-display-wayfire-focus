@@ -50,10 +50,6 @@ WallpaperItem {
         color: "black"
     }
 
-    readonly property string surfaceSource: root.configuration.SurfaceMode === "system"
-        ? "WaywallenSurface.qml"
-        : "WaywallenSurfaceEmbed.qml"
-
     property bool _initDone: false
 
     // Per-display window-state reporter. We aggregate the current
@@ -77,7 +73,7 @@ WallpaperItem {
         anchors.fill: parent
         asynchronous: false
         active: root._initDone
-        source: root.surfaceSource
+        source: "WaywallenSurface.qml"
 
         onLoaded: {
             item.displayNameBinding        = Qt.binding(() =>
@@ -114,21 +110,15 @@ WallpaperItem {
                     font.bold: true
                     font.pixelSize: 18
                     wrapMode: Text.WordWrap
-                    text: root.configuration.SurfaceMode === "system"
-                        ? i18nd("plasma_wallpaper_org.waywallen.kde",
-                                "waywallen-display is not installed")
-                        : i18nd("plasma_wallpaper_org.waywallen.kde",
-                                "Embedded waywallen-display module failed to load")
+                    text: i18nd("plasma_wallpaper_org.waywallen.kde",
+                                "waywallen-display module failed to load")
                 }
                 QQC2.Label {
                     Layout.fillWidth: true
                     color: "white"
                     wrapMode: Text.WordWrap
-                    text: root.configuration.SurfaceMode === "system"
-                        ? i18nd("plasma_wallpaper_org.waywallen.kde",
-                                "Install waywallen-display, or switch to Embedded mode in the wallpaper settings:")
-                        : i18nd("plasma_wallpaper_org.waywallen.kde",
-                                "The bundled module could not be loaded. Try switching to System mode after installing:")
+                    text: i18nd("plasma_wallpaper_org.waywallen.kde",
+                                "Install or update waywallen-display:")
                 }
                 QQC2.Label {
                     Layout.fillWidth: true
