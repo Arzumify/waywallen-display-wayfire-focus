@@ -17,6 +17,7 @@ import {GnomeShellOverride} from './gnomeShellOverride.js';
 import {LaunchSubprocess} from './launcher.js';
 import {WindowManager} from './windowManager.js';
 import {PointerForwarder} from './pointerForwarder.js';
+import {WindowStateMonitor} from './windowState.js';
 
 const DAEMON_BUS_NAME  = 'org.waywallen.waywallen.Daemon';
 const DAEMON_OBJ_PATH  = '/org/waywallen/waywallen/Daemon';
@@ -82,6 +83,8 @@ export default class WaywallenExtension extends Extension {
         this._windowMgr.enable();
         this._pointer = new PointerForwarder();
         this._pointer.enable();
+        this._winState = new WindowStateMonitor();
+        this._winState.enable();
         this._watchDaemon();
     }
 
@@ -131,15 +134,15 @@ export default class WaywallenExtension extends Extension {
         if (!this._daemonUp)
             return;
 
-        const overridePath = this._settings.get_string('renderer-binary');
-        const rendererPath = overridePath && overridePath.length > 0
-            ? overridePath
-            : GLib.build_filenamev([this.path, 'renderer', 'renderer.js']);
+        const rendererPath =
+            GLib.build_filenamev([this.path, 'renderer', 'renderer.js']);
         const argv = [
             rendererPath,
             '--instance-id',   this._settings.get_string('instance-id'),
             '--display-name',  this._settings.get_string('display-name'),
         ];
+        if (this._settings.get_boolean('show-diagnostics'))
+            argv.push('--diagnostics');
 
         this._currentProc = new LaunchSubprocess();
         this._currentProc.set_cwd(GLib.get_home_dir());
@@ -155,6 +158,7 @@ export default class WaywallenExtension extends Extension {
         this._currentProc.spawnv(argv);
         this._windowMgr?.setLauncher(this._currentProc);
         this._pointer?.setLauncher(this._currentProc);
+        this._winState?.setLauncher(this._currentProc);
 
         const proc = this._currentProc;
         proc.subprocess?.wait_async(null, (subprocess, res) => {
@@ -223,6 +227,10 @@ export default class WaywallenExtension extends Extension {
         if (this._pointer) {
             this._pointer.disable();
             this._pointer = null;
+        }
+        if (this._winState) {
+            this._winState.disable();
+            this._winState = null;
         }
         this._settings = null;
     }

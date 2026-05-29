@@ -313,6 +313,17 @@ void ww_display_send_pointer_axis(WwDisplay *self, gdouble x, gdouble y,
                                   guint64 timestamp_us, guint modifiers);
 
 /**
+ * ww_display_set_window_state:
+ * @self: a #WwDisplay
+ * @flags: WAYWALLEN_WIN_HAS_* bitmask of windows covering this display
+ *   (NON_MINIMIZED=1, ACTIVE=2, MAXIMIZED=4, FULLSCREEN=8)
+ *
+ * Report covering-window state for autopause. Fire-and-forget — the
+ * daemon owns all pause policy; the caller must not debounce or filter.
+ */
+void ww_display_set_window_state(WwDisplay *self, guint flags);
+
+/**
  * ww_display_dmabuf_texture_build:
  * @builder: (transfer none): a GdkDmabufTextureBuilder, typed as
  *   GObject so this header doesn't pull in gtk-4

@@ -25,6 +25,7 @@ set(_ext_files
     extension/wallpaper.js
     extension/windowManager.js
     extension/pointerForwarder.js
+    extension/windowState.js
     extension/prefs.js
 )
 

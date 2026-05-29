@@ -55,11 +55,27 @@ function monitorKey(monitor, index) {
     return `mon${index}`;
 }
 
+let _diagCssDone = false;
+function ensureDiagCss() {
+    if (_diagCssDone)
+        return;
+    _diagCssDone = true;
+    const css = new Gtk.CssProvider();
+    css.load_from_string(
+        '.ww-diag { background: rgba(0,0,0,0.55); color: #cdd6f4; ' +
+        'font-family: monospace; font-size: 13px; padding: 6px 8px; ' +
+        'border-radius: 6px; }');
+    Gtk.StyleContext.add_provider_for_display(
+        Gdk.Display.get_default(), css,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
 function parseArgs(argv) {
     const opts = {
         instanceId: '',
         displayName: 'gnome-shell',
         socketPath: null,
+        diagnostics: false,
     };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
@@ -69,6 +85,8 @@ function parseArgs(argv) {
             opts.displayName = argv[++i];
         } else if (a === '--socket' && i + 1 < argv.length) {
             opts.socketPath = argv[++i];
+        } else if (a === '--diagnostics') {
+            opts.diagnostics = true;
         }
     }
     return opts;
@@ -135,12 +153,59 @@ class MonitorRenderer {
         // background shows during the ~seconds before the first bind.
         this._paintable = Waywallen.ShadowPaintable.new();
         this._picture.set_paintable(this._paintable);
-        this._window.set_child(this._picture);
+
+        if (this._opts.diagnostics)
+            this._window.set_child(this._buildDiagOverlay());
+        else
+            this._window.set_child(this._picture);
         this._window.set_default_size(geom.width, geom.height);
 
         this._window.connect('realize', () => this._onRealize());
         this._window.fullscreen_on_monitor(this._monitor);
         this._window.present();
+    }
+
+    _buildDiagOverlay() {
+        ensureDiagCss();
+        const overlay = new Gtk.Overlay();
+        overlay.set_child(this._picture);
+        this._diagLabel = new Gtk.Label({
+            halign: Gtk.Align.START,
+            valign: Gtk.Align.START,
+            margin_top: 12,
+            margin_start: 12,
+            xalign: 0,
+        });
+        this._diagLabel.add_css_class('ww-diag');
+        overlay.add_overlay(this._diagLabel);
+        // The cloned actor mirrors this overlay onto the wallpaper, so the
+        // text rides along. Update once a second (fps) + on state changes.
+        this._diagTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1,
+            () => { this._updateDiag(); return GLib.SOURCE_CONTINUE; });
+        return overlay;
+    }
+
+    _updateDiag() {
+        if (!this._diagLabel)
+            return;
+        const now = GLib.get_monotonic_time();
+        const dt = this._diagLast ? (now - this._diagLast) / 1e6 : 0;
+        const frames = this._frames ?? 0;
+        const fps = dt > 0 ? ((frames - (this._diagFrames ?? 0)) / dt) : 0;
+        this._diagLast = now;
+        this._diagFrames = frames;
+        const f = this._winFlags ?? 0;
+        const ws = `${f & 1 ? 'win ' : ''}${f & 2 ? 'active ' : ''}` +
+                   `${f & 4 ? 'max ' : ''}${f & 8 ? 'full' : ''}`.trim() || 'none';
+        this._diagLabel.set_text([
+            `mon ${this._index}  ${this._displayName}`,
+            `id ${this._instanceId || '—'}`,
+            `disp ${this._pw ?? '?'}x${this._ph ?? '?'} scale=${this._scale ?? '?'}`,
+            `tex ${this._texW ?? '?'}x${this._texH ?? '?'} ` +
+                `fourcc=0x${(this._fourcc ?? 0).toString(16)} backend=${this._backend ?? '?'}`,
+            `fps ${fps.toFixed(1)}  frames ${frames}`,
+            `winstate 0x${f.toString(16)} (${ws})`,
+        ].join('\n'));
     }
 
     _onRealize() {
@@ -188,6 +253,8 @@ class MonitorRenderer {
         this._scale = scale;
         const pw = Math.round(geom.width * scale);
         const ph = Math.round(geom.height * scale);
+        this._pw = pw;
+        this._ph = ph;
 
         d.connect('textures-releasing', () => this._onTexturesReleasing());
         d.connect('config',
@@ -268,6 +335,10 @@ class MonitorRenderer {
         // build() so it's already painting the clear color.
         this._paintable.set_shadow(sfd, nPlanes, w, h, fourcc, smod,
                                    strides, offsets);
+        this._texW = w;
+        this._texH = h;
+        this._fourcc = fourcc;
+        this._backend = backend;
         logIndexed(this._index,
             `bound shadow ${w}x${h} fourcc=0x${fourcc.toString(16)} ` +
             `count=${count} backend=${backend}`);
@@ -283,6 +354,7 @@ class MonitorRenderer {
     _onFrameReady(_idx, _seq, fd) {
         if (fd >= 0)
             Waywallen.Display.close_fd(fd);
+        this._frames = (this._frames ?? 0) + 1;
         this._paintable?.refresh();
     }
 
@@ -308,6 +380,13 @@ class MonitorRenderer {
         this._display?.send_pointer_axis(x * s, y * s, dx, dy, ts, 0);
     }
 
+    sendWindowState(flags) {
+        this._winFlags = flags;
+        this._display?.set_window_state(flags);
+        if (this._diagLabel)
+            this._updateDiag();
+    }
+
     _onDisconnected(code, msg) {
         logIndexed(this._index, `disconnected: code=${code} msg=${msg}`);
         this._exit();  // extension respawns us
@@ -331,6 +410,10 @@ class MonitorRenderer {
         if (this._outSourceId) {
             GLib.source_remove(this._outSourceId);
             this._outSourceId = 0;
+        }
+        if (this._diagTimerId) {
+            GLib.source_remove(this._diagTimerId);
+            this._diagTimerId = 0;
         }
         if (this._picture)
             this._picture.set_paintable(null);
@@ -358,15 +441,15 @@ const app = new Gtk.Application({
 
 let renderers = [];
 
-// Pointer events forwarded by the extension over stdin, in global
-// compositor pixel coords (the extension can't deliver them to our
-// hidden window, so it captures and pipes them here). Dispatch to the
-// MonitorRenderer whose monitor geometry contains the point, converting
-// to monitor-local coords. Line formats:
-//   M gx gy ts                       motion
-//   B gx gy code pressed ts          button (pressed: 1/0)
-//   A gx gy dx dy ts                 axis (wheel notches)
-function dispatchPointer(line) {
+// Events forwarded by the extension over stdin, in global compositor
+// pixel coords (the extension can't deliver them to our hidden window,
+// so it captures and pipes them here). Each line carries a point used to
+// route to the MonitorRenderer whose monitor geometry contains it.
+//   M gx gy ts                       pointer motion
+//   B gx gy code pressed ts          pointer button (pressed: 1/0)
+//   A gx gy dx dy ts                 pointer axis (wheel notches)
+//   W gx gy flags                    window-state bitmask (autopause)
+function dispatchInput(line) {
     const f = line.split(' ');
     const gx = parseFloat(f[1]);
     const gy = parseFloat(f[2]);
@@ -388,10 +471,11 @@ function dispatchPointer(line) {
                                   f[4] === '1', parseInt(f[5]) || 0); break;
     case 'A': r.sendPointerAxis(lx, ly, parseFloat(f[3]) || 0,
                                 parseFloat(f[4]) || 0, parseInt(f[5]) || 0); break;
+    case 'W': r.sendWindowState(parseInt(f[3]) || 0); break;
     }
 }
 
-function readPointerStdin() {
+function readInputStdin() {
     const UnixInputStream = GioUnix?.InputStream ?? Gio.UnixInputStream;
     const stdin = Gio.DataInputStream.new(
         UnixInputStream.new(0, false));
@@ -404,7 +488,7 @@ function readPointerStdin() {
                 return;
             }
             if (len > 0 && line)
-                dispatchPointer(line);
+                dispatchInput(line);
             if (line !== null)
                 loop();
         });
@@ -427,7 +511,7 @@ app.connect('activate', () => {
         r.build(app);
         renderers.push(r);
     }
-    readPointerStdin();
+    readInputStdin();
 });
 
 app.connect('shutdown', () => {

@@ -432,6 +432,13 @@ ww_display_send_pointer_axis(WwDisplay *self, gdouble x, gdouble y,
         WAYWALLEN_AXIS_WHEEL, timestamp_us, modifiers);
 }
 
+void
+ww_display_set_window_state(WwDisplay *self, guint flags)
+{
+    if (!self->handle) return;
+    (void)waywallen_display_set_window_state(self->handle, flags);
+}
+
 /* gdk_dmabuf_texture_builder_build has a broken GIR annotation
  * (DestroyNotify with no associated callback), so GJS refuses to
  * call it. Resolve the symbol via RTLD_DEFAULT — gtk-4 is already

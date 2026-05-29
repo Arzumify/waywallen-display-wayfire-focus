@@ -3,7 +3,6 @@
 
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
-import Gdk from 'gi://Gdk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 export default class WaywallenPrefs extends ExtensionPreferences {
@@ -42,45 +41,16 @@ export default class WaywallenPrefs extends ExtensionPreferences {
         idRow.add_suffix(regen);
         group.add(idRow);
 
-        const colorGroup = new Adw.PreferencesGroup({title: 'Fallback'});
-        page.add(colorGroup);
-
-        const colorRow = new Adw.ActionRow({
-            title: 'Clear color',
-            subtitle: 'Shown until the first frame arrives.',
-        });
-        const colorBtn = new Gtk.ColorButton({valign: Gtk.Align.CENTER});
-        const rgba = new Gdk.RGBA();
-        const [r, g, b, a] = settings.get_value('clear-color').deep_unpack();
-        rgba.red = r; rgba.green = g; rgba.blue = b; rgba.alpha = a;
-        colorBtn.set_rgba(rgba);
-        colorBtn.connect('color-set', () => {
-            const c = colorBtn.get_rgba();
-            settings.set_value('clear-color',
-                new (imports.gi.GLib.Variant)('(dddd)',
-                    [c.red, c.green, c.blue, c.alpha]));
-        });
-        colorRow.add_suffix(colorBtn);
-        group.add(colorRow);
-
         const advGroup = new Adw.PreferencesGroup({title: 'Advanced'});
         page.add(advGroup);
 
         const diagRow = new Adw.SwitchRow({
             title: 'Show diagnostics overlay',
-            subtitle: 'Print connection state on top of the wallpaper (dev only).',
+            subtitle: 'Overlay resolution / fps / window-state on the wallpaper (dev only).',
         });
         settings.bind('show-diagnostics', diagRow, 'active',
             imports.gi.Gio.SettingsBindFlags.DEFAULT);
         advGroup.add(diagRow);
-
-        const binRow = new Adw.EntryRow({
-            title: 'Renderer binary override',
-        });
-        binRow.set_text(settings.get_string('renderer-binary'));
-        binRow.connect('apply', () =>
-            settings.set_string('renderer-binary', binRow.get_text()));
-        advGroup.add(binRow);
     }
 }
 
