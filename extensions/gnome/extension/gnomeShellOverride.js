@@ -14,6 +14,12 @@ const APPLICATION_ID = Wallpaper.APPLICATION_ID;
 export class GnomeShellOverride {
     constructor() {
         this._injection = new InjectionManager();
+        // Held by LiveWallpaper -> nothing; we only iterate on disable
+        // and let Clutter destruction cascades clean up otherwise.
+        // Using a Set (not Map) means we don't need to wire a destroy
+        // signal here — wiring one risks Gjs-CRITICAL during GC sweep
+        // (the handler can fire after the JS context is being torn
+        // down). Stale entries are pruned at disable() / on next switch.
         this._wallpaperActors = new Set();
     }
 
@@ -27,8 +33,6 @@ export class GnomeShellOverride {
                 const backgroundActor = originalMethod.call(this);
                 this.waywallenActor = new Wallpaper.LiveWallpaper(backgroundActor);
                 self._wallpaperActors.add(this.waywallenActor);
-                this.waywallenActor.connect('destroy', a =>
-                    self._wallpaperActors.delete(a));
                 return backgroundActor;
             });
 
@@ -101,8 +105,11 @@ export class GnomeShellOverride {
 
     disable() {
         this._injection.clear();
-        this._wallpaperActors.forEach(a => a.destroy());
+        const actors = [...this._wallpaperActors];
         this._wallpaperActors.clear();
+        for (const a of actors) {
+            try { a.destroy(); } catch (_e) {}
+        }
         if (!Main.sessionMode.isLocked)
             this._reloadBackgrounds();
     }

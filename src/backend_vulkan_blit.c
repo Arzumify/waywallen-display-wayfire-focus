@@ -18,7 +18,22 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
+
+#ifndef DMA_BUF_BASE
+#define DMA_BUF_BASE 'b'
+#endif
+#ifndef DMA_BUF_IOCTL_IMPORT_SYNC_FILE
+/* Field order must match <linux/dma-buf.h> exactly (flags then fd) —
+ * the ioctl reads at fixed offsets. */
+struct ww_dma_buf_sync_file {
+    uint32_t flags;
+    int32_t  fd;
+};
+#define DMA_BUF_IOCTL_IMPORT_SYNC_FILE _IOW(DMA_BUF_BASE, 3, struct ww_dma_buf_sync_file)
+#define DMA_BUF_SYNC_WRITE (2u)
+#endif
 
 static uint32_t pick_memory_type(const ww_vk_backend_t *backend,
                                  uint32_t type_bits,
@@ -109,6 +124,34 @@ static int create_cmd_objects(ww_vk_blitter_t *b) {
                ww_vk_result_str(vr));
         return -EIO;
     }
+
+    /* Exportable signal semaphore (SYNC_FD). Pattern matches GTK's
+     * gsk/gpu/gskgpudownloadop.c — signal in submit, vkGetSemaphoreFdKHR
+     * gives a real sync_file fd, ioctl-import into dma_resv. */
+    VkExportSemaphoreCreateInfo exp_sem = {
+        .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+        .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+    };
+    VkSemaphoreCreateInfo sci = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = &exp_sem,
+    };
+    vr = b->backend.vkCreateSemaphore(b->backend.device, &sci, NULL,
+                                       &b->export_sem);
+    if (vr != VK_SUCCESS) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk blitter: vkCreateSemaphore(export) failed: %s",
+               ww_vk_result_str(vr));
+        return -EIO;
+    }
+    b->vkGetSemaphoreFdKHR = (PFN_vkGetSemaphoreFdKHR)
+        b->backend.vkGetDeviceProcAddr(b->backend.device,
+                                       "vkGetSemaphoreFdKHR");
+    if (!b->vkGetSemaphoreFdKHR) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk blitter: vkGetSemaphoreFdKHR not resolvable");
+        return -ENOSYS;
+    }
     return 0;
 }
 
@@ -152,6 +195,7 @@ int ww_vk_blitter_init(ww_vk_blitter_t *b,
         return rc;
     }
 
+    b->shadow_export_fd = -1;
     b->initialized = true;
     ww_log(WAYWALLEN_LOG_INFO,
            "vk blitter ready (qfi=%u queue=%p)",
@@ -168,6 +212,11 @@ static void destroy_shadow(ww_vk_blitter_t *b) {
         b->backend.vkFreeMemory(b->backend.device, b->shadow_mem, NULL);
         b->shadow_mem = VK_NULL_HANDLE;
     }
+    if (b->shadow_export_fd >= 0) {
+        close(b->shadow_export_fd);
+        b->shadow_export_fd = -1;
+    }
+    b->shadow_export_n_planes = 0;
     b->shadow_w = 0;
     b->shadow_h = 0;
     b->shadow_fmt = VK_FORMAT_UNDEFINED;
@@ -211,6 +260,13 @@ static void enqueue_shadow_destroy(ww_vk_blitter_t *b) {
     b->pending_shadow_destroy[idx].frames_remaining = 2;
     b->shadow_image = VK_NULL_HANDLE;
     b->shadow_mem   = VK_NULL_HANDLE;
+    /* Exporting consumers hold their own dup; releasing our fd here
+     * just drops the lib's reference and doesn't unmap the dmabuf. */
+    if (b->shadow_export_fd >= 0) {
+        close(b->shadow_export_fd);
+        b->shadow_export_fd = -1;
+    }
+    b->shadow_export_n_planes = 0;
     b->shadow_w = 0;
     b->shadow_h = 0;
     b->shadow_fmt = VK_FORMAT_UNDEFINED;
@@ -363,6 +419,217 @@ int ww_vk_blitter_ensure_shadow(ww_vk_blitter_t *b,
     return 0;
 }
 
+/* Lazily resolve vkGetMemoryFdKHR + vkGetImageSubresourceLayout the
+ * first time the relay path needs them. Both are core / KHR entry
+ * points on a device with VK_KHR_external_memory_fd. */
+static int resolve_export_fns(ww_vk_blitter_t *b) {
+    PFN_vkGetDeviceProcAddr gdpa = b->backend.vkGetDeviceProcAddr;
+    VkDevice device = b->backend.device;
+    if (!b->vkGetMemoryFdKHR) {
+        b->vkGetMemoryFdKHR = (PFN_vkGetMemoryFdKHR)gdpa(
+            device, "vkGetMemoryFdKHR");
+    }
+    if (!b->vkGetImageSubresourceLayout) {
+        b->vkGetImageSubresourceLayout = (PFN_vkGetImageSubresourceLayout)gdpa(
+            device, "vkGetImageSubresourceLayout");
+    }
+    if (!b->vkGetMemoryFdKHR || !b->vkGetImageSubresourceLayout) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk blitter: export fns missing (KHR_external_memory_fd?)");
+        return -ENOSYS;
+    }
+    return 0;
+}
+
+int ww_vk_blitter_ensure_shadow_exportable(ww_vk_blitter_t *b,
+                                            uint32_t w, uint32_t h,
+                                            VkFormat fmt) {
+    if (!b || !b->initialized) return -EINVAL;
+    if (w == 0 || h == 0 || fmt == VK_FORMAT_UNDEFINED) return -EINVAL;
+    /* Same shape + already exportable -> nothing to do. */
+    if (b->shadow_image != VK_NULL_HANDLE
+        && b->shadow_w == w && b->shadow_h == h && b->shadow_fmt == fmt
+        && b->shadow_export_fd >= 0) {
+        return 0;
+    }
+
+    int rc = resolve_export_fns(b);
+    if (rc != 0) return rc;
+
+    /* Drain in-flight blit referencing the old shadow first. Same
+     * bounded-wait shape as `ensure_shadow`. */
+    static const uint64_t WW_SHADOW_DRAIN_NS = 2ull * 1000ull * 1000ull * 1000ull;
+    if (b->fence_armed) {
+        VkResult vrw = b->vkWaitForFences(b->backend.device, 1, &b->fence,
+                                           VK_TRUE, WW_SHADOW_DRAIN_NS);
+        if (vrw == VK_TIMEOUT) {
+            ww_log(WAYWALLEN_LOG_WARN,
+                   "vk blitter: exportable-shadow drain wait timed out");
+            return -EIO;
+        }
+        b->vkResetFences(b->backend.device, 1, &b->fence);
+        b->fence_armed = false;
+    }
+    enqueue_shadow_destroy(b);
+
+    VkExternalMemoryImageCreateInfo ext_img = {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = &ext_img,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = fmt,
+        .extent = { w, h, 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        /* LINEAR + DRM_FORMAT_MOD_LINEAR is the only safe path without
+         * pulling in modifier negotiation; produces a single-plane
+         * dmabuf every consumer can import. */
+        .tiling = VK_IMAGE_TILING_LINEAR,
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT
+               | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 1,
+        .pQueueFamilyIndices = &b->backend.queue_family_index,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    VkResult vr = b->backend.vkCreateImage(b->backend.device, &ici, NULL,
+                                           &b->shadow_image);
+    if (vr != VK_SUCCESS) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk blitter: vkCreateImage(exportable %ux%u fmt=%d) failed: %s",
+               w, h, (int)fmt, ww_vk_result_str(vr));
+        return -EIO;
+    }
+
+    VkMemoryRequirements req;
+    b->backend.vkGetImageMemoryRequirements(b->backend.device,
+                                            b->shadow_image, &req);
+
+    uint32_t mtype = pick_memory_type(&b->backend, req.memoryTypeBits,
+                                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (mtype == UINT32_MAX) {
+        /* Some integrated GPUs only expose HOST_VISIBLE for LINEAR. */
+        mtype = pick_memory_type(&b->backend, req.memoryTypeBits, 0);
+    }
+    if (mtype == UINT32_MAX) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk blitter: no memory type for exportable shadow "
+               "(typeBits=0x%08x)", req.memoryTypeBits);
+        b->backend.vkDestroyImage(b->backend.device, b->shadow_image, NULL);
+        b->shadow_image = VK_NULL_HANDLE;
+        return -EIO;
+    }
+
+    VkExportMemoryAllocateInfo exp_mem = {
+        .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    /* Dedicated allocation is mandated for many external-memory drivers
+     * and harmless otherwise. */
+    VkMemoryDedicatedAllocateInfo ded = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
+        .pNext = &exp_mem,
+        .image = b->shadow_image,
+    };
+    VkMemoryAllocateInfo mai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = &ded,
+        .allocationSize = req.size,
+        .memoryTypeIndex = mtype,
+    };
+    vr = b->backend.vkAllocateMemory(b->backend.device, &mai, NULL,
+                                     &b->shadow_mem);
+    if (vr != VK_SUCCESS) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk blitter: vkAllocateMemory(exportable size=%" PRIu64 ") failed: %s",
+               (uint64_t)req.size, ww_vk_result_str(vr));
+        b->backend.vkDestroyImage(b->backend.device, b->shadow_image, NULL);
+        b->shadow_image = VK_NULL_HANDLE;
+        return -EIO;
+    }
+    vr = b->backend.vkBindImageMemory(b->backend.device, b->shadow_image,
+                                      b->shadow_mem, 0);
+    if (vr != VK_SUCCESS) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk blitter: vkBindImageMemory(exportable) failed: %s",
+               ww_vk_result_str(vr));
+        destroy_shadow(b);
+        return -EIO;
+    }
+
+    /* Single LINEAR plane: query its row pitch + offset. */
+    VkImageSubresource sub = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .mipLevel = 0,
+        .arrayLayer = 0,
+    };
+    VkSubresourceLayout layout;
+    memset(&layout, 0, sizeof(layout));
+    b->vkGetImageSubresourceLayout(b->backend.device, b->shadow_image,
+                                    &sub, &layout);
+
+    VkMemoryGetFdInfoKHR gfd = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
+        .memory = b->shadow_mem,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    int dmabuf_fd = -1;
+    vr = b->vkGetMemoryFdKHR(b->backend.device, &gfd, &dmabuf_fd);
+    if (vr != VK_SUCCESS || dmabuf_fd < 0) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk blitter: vkGetMemoryFdKHR failed: %s",
+               ww_vk_result_str(vr));
+        destroy_shadow(b);
+        return -EIO;
+    }
+
+    b->shadow_w = w;
+    b->shadow_h = h;
+    b->shadow_fmt = fmt;
+    b->shadow_export_fd = dmabuf_fd;
+    b->shadow_export_n_planes = 1;
+    /* rowPitch fits in uint32_t for any realistic surface; explicit cast
+     * keeps -Wconversion silent. */
+    b->shadow_export_strides[0] = (uint32_t)layout.rowPitch;
+    b->shadow_export_offsets[0] = (uint64_t)layout.offset;
+    b->shadow_export_modifier = 0ull;  /* DRM_FORMAT_MOD_LINEAR */
+    b->shadow_has_content = false;
+
+    ww_log(WAYWALLEN_LOG_INFO,
+           "vk blitter: exportable shadow %ux%u fmt=%d ready "
+           "(mtype=%u size=%" PRIu64 " fd=%d stride=%u offset=%" PRIu64 ")",
+           w, h, (int)fmt, mtype, (uint64_t)req.size,
+           dmabuf_fd, b->shadow_export_strides[0], b->shadow_export_offsets[0]);
+    return 0;
+}
+
+int ww_vk_blitter_get_export(const ww_vk_blitter_t *b,
+                              int *out_fd,
+                              uint32_t *out_n_planes,
+                              uint32_t out_strides[4],
+                              uint64_t out_offsets[4],
+                              uint64_t *out_modifier) {
+    if (!b || !out_fd || !out_n_planes || !out_strides || !out_offsets
+        || !out_modifier) {
+        return -EINVAL;
+    }
+    if (b->shadow_export_fd < 0 || b->shadow_export_n_planes == 0) {
+        return -EINVAL;
+    }
+    *out_fd = b->shadow_export_fd;
+    *out_n_planes = b->shadow_export_n_planes;
+    for (uint32_t i = 0; i < b->shadow_export_n_planes && i < 4u; i++) {
+        out_strides[i] = b->shadow_export_strides[i];
+        out_offsets[i] = b->shadow_export_offsets[i];
+    }
+    *out_modifier = b->shadow_export_modifier;
+    return 0;
+}
+
 static VkImageSubresourceRange full_color_range(void) {
     VkImageSubresourceRange r = {
         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -452,12 +719,12 @@ int ww_vk_blitter_blit(ww_vk_blitter_t *b,
         .image = imported,
         .subresourceRange = full_color_range(),
     };
-    /* Shadow: any prior layout (sampling) -> TRANSFER_DST. UNDEFINED on
-     * first frame; subsequent frames also OK to discard, since we
-     * overwrite the entire image. */
+    /* Shadow: discard prior layout (we overwrite the whole image).
+     * Visibility to the external reader (GSK) is published after submit
+     * via DMA_BUF_IOCTL_IMPORT_SYNC_FILE, not via this barrier. */
     VkImageMemoryBarrier shadow_bar0 = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .srcAccessMask = 0,
         .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -495,6 +762,9 @@ int ww_vk_blitter_blit(ww_vk_blitter_t *b,
         b->shadow_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         1, &region);
 
+    /* Plain layout transition to SHADER_READ_ONLY_OPTIMAL. The external
+     * reader (GSK) gets write-fence visibility via the dma_resv
+     * injection below, so QUEUE_FAMILY_IGNORED is correct here. */
     VkImageMemoryBarrier shadow_bar1 = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -528,6 +798,8 @@ int ww_vk_blitter_blit(ww_vk_blitter_t *b,
         .pWaitDstStageMask = (acquire_sem != VK_NULL_HANDLE) ? &wait_stage : NULL,
         .commandBufferCount = 1,
         .pCommandBuffers = &b->cb,
+        .signalSemaphoreCount = (b->export_sem != VK_NULL_HANDLE) ? 1u : 0u,
+        .pSignalSemaphores = (b->export_sem != VK_NULL_HANDLE) ? &b->export_sem : NULL,
     };
     /* Don't try to signal release_syncobj_fd from this submit via
      * vkImportSemaphoreFdKHR(OPAQUE_FD): NVIDIA rejects drm_syncobj
@@ -566,6 +838,39 @@ int ww_vk_blitter_blit(ww_vk_blitter_t *b,
                ww_vk_result_str(vr));
         if (release_syncobj_fd >= 0) close(release_syncobj_fd);
         return -EIO;
+    }
+    /* Publish blit's signal as a sync_file → ioctl-import into shadow
+     * dmabuf's dma_resv as DMA_BUF_SYNC_WRITE. GSK's later read
+     * submission picks it up via kernel implicit DMA-BUF sync, so the
+     * long-lived imported VkImage's sampler sees fresh content without
+     * us having to rebuild the GdkTexture every frame. Direct copy of
+     * the gsk/gpu/gskgpudownloadop.c pattern. */
+    if (b->shadow_export_fd >= 0 && b->vkGetSemaphoreFdKHR) {
+        int sync_fd = -1;
+        VkSemaphoreGetFdInfoKHR get = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
+            .semaphore = b->export_sem,
+            .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+        };
+        VkResult er = b->vkGetSemaphoreFdKHR(b->backend.device, &get, &sync_fd);
+        if (er == VK_SUCCESS && sync_fd >= 0) {
+            struct ww_dma_buf_sync_file sf = {
+                .flags = DMA_BUF_SYNC_WRITE,
+                .fd    = sync_fd,
+            };
+            if (ioctl(b->shadow_export_fd, DMA_BUF_IOCTL_IMPORT_SYNC_FILE,
+                      &sf) != 0) {
+                ww_log(WAYWALLEN_LOG_WARN,
+                       "vk blitter: dma_buf import_sync_file(fd=%d shadow=%d) "
+                       "failed: %s",
+                       sync_fd, b->shadow_export_fd, strerror(errno));
+            }
+            close(sync_fd);
+        } else if (er != VK_SUCCESS) {
+            ww_log(WAYWALLEN_LOG_WARN,
+                   "vk blitter: vkGetSemaphoreFdKHR failed: %s",
+                   ww_vk_result_str(er));
+        }
     }
     b->vkResetFences(b->backend.device, 1, &b->fence);
     b->fence_armed = false;
@@ -613,6 +918,10 @@ void ww_vk_blitter_shutdown(ww_vk_blitter_t *b) {
     }
     b->pending_shadow_destroy_count = 0;
     destroy_shadow(b);
+    if (b->export_sem != VK_NULL_HANDLE && b->backend.vkDestroySemaphore) {
+        b->backend.vkDestroySemaphore(b->backend.device, b->export_sem, NULL);
+        b->export_sem = VK_NULL_HANDLE;
+    }
     if (b->fence != VK_NULL_HANDLE && b->vkDestroyFence) {
         b->vkDestroyFence(b->backend.device, b->fence, NULL);
         b->fence = VK_NULL_HANDLE;

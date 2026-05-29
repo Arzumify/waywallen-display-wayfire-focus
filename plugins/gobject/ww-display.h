@@ -89,6 +89,50 @@ gboolean ww_display_bind_egl(WwDisplay *self,
                              gpointer get_proc_address);
 
 /**
+ * ww_display_bind_dmabuf_relay:
+ * @self: a #WwDisplay
+ *
+ * Bind the DMABUF_RELAY backend: the library opens a private Vulkan
+ * instance/device, imports producer DMA-BUFs, blits into a LINEAR
+ * shadow whose DMA-BUF is re-exported for the host to import.
+ *
+ * Must be called before ww_display_begin_connect(). Useful for shells
+ * (GTK4) that can consume DMA-BUFs via GdkDmabufTexture but don't
+ * expose a Vulkan device for direct bind_vulkan.
+ *
+ * Returns: TRUE on success
+ */
+gboolean ww_display_bind_dmabuf_relay(WwDisplay *self);
+
+/**
+ * ww_display_get_shadow_export:
+ * @self: a #WwDisplay
+ * @out_fd: (out): a fresh dup of the shadow's DMA-BUF fd; the caller
+ *   owns it and must close (-1 on failure).
+ * @out_n_planes: (out): plane count (always 1 today)
+ * @out_strides: (out caller-allocates) (array fixed-size=4): per-plane
+ *   row pitch in bytes; only the first @out_n_planes entries are
+ *   meaningful.
+ * @out_offsets: (out caller-allocates) (array fixed-size=4): per-plane
+ *   byte offset into the dmabuf.
+ * @out_modifier: (out): DRM format modifier (DRM_FORMAT_MOD_LINEAR=0
+ *   today).
+ *
+ * Read the shadow DMA-BUF descriptor populated on the most recent
+ * `textures-ready` for DMABUF_RELAY mode. The fd is dup'd before
+ * return so callers can safely close after consuming.
+ *
+ * Returns: TRUE on success; FALSE if the current backend isn't
+ * DMABUF_RELAY or no shadow has been allocated yet.
+ */
+gboolean ww_display_get_shadow_export(WwDisplay *self,
+                                      gint *out_fd,
+                                      guint *out_n_planes,
+                                      guint out_strides[4],
+                                      guint64 out_offsets[4],
+                                      guint64 *out_modifier);
+
+/**
  * ww_display_set_drm_render_node:
  * @self: a #WwDisplay
  * @major: DRM render-node major
@@ -229,6 +273,28 @@ gint ww_display_dup_release_fd(gint fd);
  * without signaling its release (e.g. during shutdown).
  */
 void ww_display_close_fd(gint fd);
+
+/**
+ * ww_display_dmabuf_texture_build:
+ * @builder: (transfer none): a GdkDmabufTextureBuilder, typed as
+ *   GObject so this header doesn't pull in gtk-4
+ *
+ * Workaround for the broken GIR annotation on
+ * gdk_dmabuf_texture_builder_build() — its `destroy` parameter is a
+ * GDestroyNotify with no associated callback annotation, which makes
+ * GJS refuse to call the function. This helper resolves the GTK
+ * symbol via RTLD_DEFAULT (gtk-4 is already loaded by any caller
+ * that imported gi://Gdk) and invokes it with destroy=NULL, data=NULL.
+ *
+ * Since the return type is declared as #GObject*, GJS will dispatch
+ * to the correct wrapper class (#GdkTexture) at runtime via the
+ * object's GType. The returned texture is owned by the caller.
+ *
+ * Returns: (transfer full) (nullable): the built texture, typed as
+ *   GObject for the same header-isolation reason — JS code can pass
+ *   it directly to e.g. `picture.set_paintable(tex)`.
+ */
+GObject *ww_display_dmabuf_texture_build(GObject *builder);
 
 /**
  * ww_display_disconnect:

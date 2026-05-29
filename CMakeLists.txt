@@ -352,9 +352,10 @@ endif()
 option(WAYWALLEN_DISPLAY_PLUGIN_GNOME "Build the GNOME Shell extension" OFF)
 if(WAYWALLEN_DISPLAY_PLUGIN_GNOME)
     if(NOT WAYWALLEN_DISPLAY_PLUGIN_GOBJECT)
-        message(FATAL_ERROR
-            "WAYWALLEN_DISPLAY_PLUGIN_GNOME requires WAYWALLEN_DISPLAY_PLUGIN_GOBJECT=ON; "
-            "the GNOME renderer subprocess imports gi://Waywallen.")
+        message(WARNING
+            "WAYWALLEN_DISPLAY_PLUGIN_GNOME without WAYWALLEN_DISPLAY_PLUGIN_GOBJECT=ON: "
+            "the GNOME renderer subprocess imports gi://Waywallen at runtime, so users "
+            "still need libwaywallen-gobject installed from a separate build/package.")
     endif()
     add_subdirectory(extensions/gnome)
     message(STATUS "libwaywallen_display: GNOME extension ENABLED")

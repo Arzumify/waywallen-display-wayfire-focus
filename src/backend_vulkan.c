@@ -841,6 +841,236 @@ int ww_vk_query_supports_device_local(const ww_vk_backend_t *backend,
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Library-owned VkInstance / VkDevice / VkQueue                       */
+/* ------------------------------------------------------------------ */
+
+/* Public fourcc -> VkFormat shim — same table as the import path; UNORM
+ * everywhere so the LINEAR shadow doesn't get an sRGB transfer applied
+ * by the driver. Consumers that need sRGB sampling pick a sRGB view
+ * format on their side. */
+VkFormat ww_fourcc_to_vk_format(uint32_t fourcc) {
+    return drm_fourcc_to_vk(fourcc);
+}
+
+/* Return true if `name` is in the `count`-entry array `props`. */
+static bool ext_present(const VkExtensionProperties *props, uint32_t count,
+                        const char *name) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (strcmp(props[i].extensionName, name) == 0) return true;
+    }
+    return false;
+}
+
+int ww_vk_create_owned(ww_vk_owned_t *out) {
+    if (!out) return -EINVAL;
+    memset(out, 0, sizeof(*out));
+
+    if (!s_libvulkan) {
+        s_libvulkan = dlopen("libvulkan.so.1", RTLD_LAZY | RTLD_LOCAL);
+    }
+    if (!s_libvulkan) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk owned: dlopen(libvulkan.so.1) failed: %s", dlerror());
+        return -ENOENT;
+    }
+    out->libvulkan = s_libvulkan;
+
+    /* function-ptr-shaped dlsym via union to dodge -Wpedantic */
+    union { void *obj; void (*func)(void); } cvt;
+    cvt.obj = dlsym(s_libvulkan, "vkGetInstanceProcAddr");
+    if (!cvt.obj) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk owned: dlsym(vkGetInstanceProcAddr) failed");
+        return -ENOSYS;
+    }
+    out->vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)cvt.func;
+
+    PFN_vkGetInstanceProcAddr gipa = out->vkGetInstanceProcAddr;
+
+    /* Instance-level fns reachable without an instance. */
+    PFN_vkCreateInstance vkCreateInstance =
+        (PFN_vkCreateInstance)gipa(VK_NULL_HANDLE, "vkCreateInstance");
+    if (!vkCreateInstance) {
+        ww_log(WAYWALLEN_LOG_ERROR, "vk owned: gipa(vkCreateInstance) NULL");
+        return -ENOSYS;
+    }
+
+    VkApplicationInfo app = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "waywallen-display",
+        .applicationVersion = 1,
+        .pEngineName = "waywallen-display",
+        .engineVersion = 1,
+        /* 1.1 promotes the property2 / external-memory-fd entry points
+         * to core; dma-buf and drm-format-modifier remain EXT and must
+         * be enabled per-device. */
+        .apiVersion = VK_API_VERSION_1_1,
+    };
+    VkInstanceCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pApplicationInfo = &app,
+    };
+    VkResult vr = vkCreateInstance(&ici, NULL, &out->instance);
+    if (vr != VK_SUCCESS) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk owned: vkCreateInstance failed: %s", ww_vk_result_str(vr));
+        return -EIO;
+    }
+
+    /* Instance-level destroy / enumeration fns. */
+    out->vkDestroyInstance =
+        (PFN_vkDestroyInstance)gipa(out->instance, "vkDestroyInstance");
+    out->vkDestroyDevice =
+        (PFN_vkDestroyDevice)gipa(out->instance, "vkDestroyDevice");
+
+    PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices =
+        (PFN_vkEnumeratePhysicalDevices)gipa(out->instance,
+                                              "vkEnumeratePhysicalDevices");
+    PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties =
+        (PFN_vkEnumerateDeviceExtensionProperties)gipa(
+            out->instance, "vkEnumerateDeviceExtensionProperties");
+    PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties =
+        (PFN_vkGetPhysicalDeviceQueueFamilyProperties)gipa(
+            out->instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+    PFN_vkCreateDevice vkCreateDevice =
+        (PFN_vkCreateDevice)gipa(out->instance, "vkCreateDevice");
+    PFN_vkGetDeviceQueue vkGetDeviceQueue =
+        (PFN_vkGetDeviceQueue)gipa(out->instance, "vkGetDeviceQueue");
+    if (!out->vkDestroyInstance || !out->vkDestroyDevice
+        || !vkEnumeratePhysicalDevices
+        || !vkEnumerateDeviceExtensionProperties
+        || !vkGetPhysicalDeviceQueueFamilyProperties
+        || !vkCreateDevice || !vkGetDeviceQueue) {
+        ww_log(WAYWALLEN_LOG_ERROR, "vk owned: missing instance fn");
+        ww_vk_destroy_owned(out);
+        return -ENOSYS;
+    }
+
+    uint32_t pd_count = 0;
+    vkEnumeratePhysicalDevices(out->instance, &pd_count, NULL);
+    if (pd_count == 0) {
+        ww_log(WAYWALLEN_LOG_ERROR, "vk owned: no physical devices");
+        ww_vk_destroy_owned(out);
+        return -ENOSYS;
+    }
+    VkPhysicalDevice *pds = (VkPhysicalDevice *)calloc(pd_count, sizeof(*pds));
+    if (!pds) {
+        ww_vk_destroy_owned(out);
+        return -EIO;
+    }
+    vkEnumeratePhysicalDevices(out->instance, &pd_count, pds);
+
+    const char *want[] = {
+        "VK_EXT_external_memory_dma_buf",
+        "VK_EXT_image_drm_format_modifier",
+        "VK_KHR_external_memory_fd",
+        "VK_KHR_external_semaphore_fd",
+    };
+    const uint32_t want_n = (uint32_t)(sizeof(want) / sizeof(want[0]));
+
+    int picked_pd = -1;
+    uint32_t picked_qfi = 0;
+    for (uint32_t i = 0; i < pd_count; i++) {
+        uint32_t ec = 0;
+        vkEnumerateDeviceExtensionProperties(pds[i], NULL, &ec, NULL);
+        if (ec == 0) continue;
+        VkExtensionProperties *eprops =
+            (VkExtensionProperties *)calloc(ec, sizeof(*eprops));
+        if (!eprops) continue;
+        vkEnumerateDeviceExtensionProperties(pds[i], NULL, &ec, eprops);
+
+        bool all = true;
+        for (uint32_t w = 0; w < want_n; w++) {
+            if (!ext_present(eprops, ec, want[w])) { all = false; break; }
+        }
+        free(eprops);
+        if (!all) continue;
+
+        uint32_t qc = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(pds[i], &qc, NULL);
+        if (qc == 0) continue;
+        VkQueueFamilyProperties *qprops =
+            (VkQueueFamilyProperties *)calloc(qc, sizeof(*qprops));
+        if (!qprops) continue;
+        vkGetPhysicalDeviceQueueFamilyProperties(pds[i], &qc, qprops);
+
+        int q_index = -1;
+        for (uint32_t q = 0; q < qc; q++) {
+            VkQueueFlags f = qprops[q].queueFlags;
+            if (f & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT
+                     | VK_QUEUE_COMPUTE_BIT)) {
+                q_index = (int)q;
+                break;
+            }
+        }
+        free(qprops);
+        if (q_index < 0) continue;
+
+        picked_pd = (int)i;
+        picked_qfi = (uint32_t)q_index;
+        break;
+    }
+
+    if (picked_pd < 0) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk owned: no GPU with required extensions+queue family "
+               "(VK_EXT_external_memory_dma_buf + "
+               "VK_EXT_image_drm_format_modifier + VK_KHR_external_memory_fd)");
+        free(pds);
+        ww_vk_destroy_owned(out);
+        return -ENOSYS;
+    }
+    out->physical_device = pds[picked_pd];
+    out->queue_family_index = picked_qfi;
+    free(pds);
+
+    float prio = 1.0f;
+    VkDeviceQueueCreateInfo qci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = picked_qfi,
+        .queueCount = 1,
+        .pQueuePriorities = &prio,
+    };
+    VkDeviceCreateInfo dci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &qci,
+        .enabledExtensionCount = want_n,
+        .ppEnabledExtensionNames = want,
+    };
+    vr = vkCreateDevice(out->physical_device, &dci, NULL, &out->device);
+    if (vr != VK_SUCCESS) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk owned: vkCreateDevice failed: %s", ww_vk_result_str(vr));
+        ww_vk_destroy_owned(out);
+        return -EIO;
+    }
+
+    vkGetDeviceQueue(out->device, picked_qfi, 0, &out->queue);
+    if (out->queue == VK_NULL_HANDLE) {
+        ww_log(WAYWALLEN_LOG_ERROR, "vk owned: vkGetDeviceQueue returned NULL");
+        ww_vk_destroy_owned(out);
+        return -EIO;
+    }
+    ww_log(WAYWALLEN_LOG_INFO,
+           "vk owned: ready instance=%p device=%p qfi=%u",
+           (void *)out->instance, (void *)out->device, picked_qfi);
+    return 0;
+}
+
+void ww_vk_destroy_owned(ww_vk_owned_t *o) {
+    if (!o) return;
+    if (o->device != VK_NULL_HANDLE && o->vkDestroyDevice) {
+        o->vkDestroyDevice(o->device, NULL);
+    }
+    if (o->instance != VK_NULL_HANDLE && o->vkDestroyInstance) {
+        o->vkDestroyInstance(o->instance, NULL);
+    }
+    /* Leave s_libvulkan loaded — process-global, see backend_load. */
+    memset(o, 0, sizeof(*o));
+}
+
 #else /* !WW_HAVE_VULKAN */
 
 typedef int ww_vk_backend_disabled_t;

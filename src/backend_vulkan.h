@@ -193,6 +193,39 @@ int ww_vk_query_supports_device_local(const ww_vk_backend_t *backend,
                                       int *out_has_device_local);
 
 /* ------------------------------------------------------------------ */
+/*  Library-owned Vulkan instance/device                                */
+/* ------------------------------------------------------------------ */
+
+/* Minimal lib-owned instance + device + queue suitable for the
+ * DMABUF_RELAY backend. Picks the first physical device that exposes
+ * VK_EXT_external_memory_dma_buf, VK_EXT_image_drm_format_modifier and
+ * VK_KHR_external_memory_fd plus a transfer-capable queue family.
+ *
+ * Output handles are owned by the caller — destroy via
+ * `ww_vk_destroy_owned`. */
+typedef struct ww_vk_owned {
+    void                     *libvulkan;             /* dlopen handle */
+    PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
+    PFN_vkDestroyInstance     vkDestroyInstance;
+    PFN_vkDestroyDevice       vkDestroyDevice;
+    VkInstance        instance;
+    VkPhysicalDevice  physical_device;
+    VkDevice          device;
+    uint32_t          queue_family_index;
+    VkQueue           queue;
+} ww_vk_owned_t;
+
+/* Returns 0 on success, -ENOENT if libvulkan.so.1 cannot be loaded,
+ * -ENOSYS if no suitable GPU/queue is found, -EIO on any other Vulkan
+ * failure. Output struct is zeroed on failure. */
+int  ww_vk_create_owned(ww_vk_owned_t *out);
+void ww_vk_destroy_owned(ww_vk_owned_t *o);
+
+/* Map a DRM fourcc to the VkFormat used by the lib-internal blitter +
+ * shadow image path. Returns VK_FORMAT_UNDEFINED on unknown fourcc. */
+VkFormat ww_fourcc_to_vk_format(uint32_t fourcc);
+
+/* ------------------------------------------------------------------ */
 
 typedef struct ww_vk_dmabuf_import {
     uint32_t fourcc;

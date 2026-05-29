@@ -31,6 +31,9 @@ class LiveWallpaper extends St.Widget {
         backgroundActor.add_child(this);
 
         this._cloneActor = null;
+        this._cloneDestroyId = 0;
+        this._sourceActor = null;
+        this._sourceDestroyId = 0;
         this._pollId = 0;
         this._tryAttach();
     }
@@ -42,26 +45,65 @@ class LiveWallpaper extends St.Widget {
                 source: renderer,
                 pivot_point: new Graphene.Point({x: 0.5, y: 0.5}),
             });
-            this._cloneActor.connect('destroy', () => {
+            this._cloneDestroyId = this._cloneActor.connect('destroy', () => {
                 this._cloneActor = null;
+                this._cloneDestroyId = 0;
             });
+            this._sourceActor = renderer;
+            this._sourceDestroyId = renderer.connect('destroy',
+                () => this._onSourceDestroyed());
             this.add_child(this._cloneActor);
             this.ease({
                 opacity: 255,
                 duration: FADE_IN_MS,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
+            // The Background actor we're parented under is treated as a
+            // static layer by gnome-shell — it only redraws on wallpaper
+            // changes, NOT when our source MetaWindowActor commits new
+            // wl_buffers. Without this timer the wallpaper freezes on
+            // the first frame even though the source is updating at
+            // 30/60 Hz.
+            this._redrawTimerId = GLib.timeout_add(
+                GLib.PRIORITY_DEFAULT, 16, () => {
+                    if (this._cloneActor)
+                        this._cloneActor.queue_redraw();
+                    return GLib.SOURCE_CONTINUE;
+                });
             return;
         }
-        // Renderer window not visible yet; poll once a second.
-        if (this._pollId === 0) {
-            this._pollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
-                this._pollId = 0;
-                if (!this._cloneActor)
-                    this._tryAttach();
-                return GLib.SOURCE_REMOVE;
-            });
+        this._schedulePoll();
+    }
+
+    _schedulePoll() {
+        if (this._pollId !== 0)
+            return;
+        this._pollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+            this._pollId = 0;
+            if (!this._cloneActor)
+                this._tryAttach();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _onSourceDestroyed() {
+        this._sourceDestroyId = 0;
+        this._sourceActor = null;
+        if (this._redrawTimerId) {
+            GLib.source_remove(this._redrawTimerId);
+            this._redrawTimerId = 0;
         }
+        if (this._cloneActor) {
+            const clone = this._cloneActor;
+            this._cloneActor = null;
+            if (this._cloneDestroyId) {
+                try { clone.disconnect(this._cloneDestroyId); } catch (_e) {}
+                this._cloneDestroyId = 0;
+            }
+            this.opacity = 0;
+            try { clone.destroy(); } catch (_e) {}
+        }
+        this._schedulePoll();
     }
 
     _findRenderer() {
@@ -88,6 +130,20 @@ class LiveWallpaper extends St.Widget {
             GLib.source_remove(this._pollId);
             this._pollId = 0;
         }
+        if (this._redrawTimerId) {
+            GLib.source_remove(this._redrawTimerId);
+            this._redrawTimerId = 0;
+        }
+        if (this._sourceActor && this._sourceDestroyId) {
+            try { this._sourceActor.disconnect(this._sourceDestroyId); } catch (_e) {}
+        }
+        this._sourceActor = null;
+        this._sourceDestroyId = 0;
+        if (this._cloneActor && this._cloneDestroyId) {
+            try { this._cloneActor.disconnect(this._cloneDestroyId); } catch (_e) {}
+            this._cloneDestroyId = 0;
+        }
+        this._cloneActor = null;
         super.on_destroy?.();
     }
 });

@@ -166,6 +166,13 @@ typedef enum waywallen_backend {
     WAYWALLEN_BACKEND_NONE = 0,
     WAYWALLEN_BACKEND_EGL = 1,
     WAYWALLEN_BACKEND_VULKAN = 2,
+    /* Library owns a private Vulkan instance/device, imports the
+     * producer DMA-BUF, blits into a LINEAR shadow image whose
+     * DMA-BUF is re-exported for the host. The host samples that
+     * shadow DMA-BUF through whatever import path it likes
+     * (typically GdkDmabufTexture / wl_dmabuf). One blit per frame,
+     * sync is kernel-implicit via dma-resv on the shadow. */
+    WAYWALLEN_BACKEND_DMABUF_RELAY = 3,
 } waywallen_backend_t;
 
 typedef struct waywallen_egl_ctx {
@@ -198,6 +205,8 @@ typedef struct waywallen_rect {
  * the host bound via `bind_egl` / `bind_vulkan`. If no backend was
  * bound, `backend == NONE` and all handle arrays are NULL — only the
  * descriptor metadata is meaningful. */
+#define WAYWALLEN_DMABUF_MAX_PLANES 4
+
 typedef struct waywallen_textures {
     uint32_t count;
     uint32_t tex_width;
@@ -213,6 +222,23 @@ typedef struct waywallen_textures {
                                   * waywallen_display_create_gl_texture (EGL) */
     void **vk_images;            /* length == count; each is a VkImage (Vulkan) */
     void **vk_memories;          /* length == count; each is a VkDeviceMemory (Vulkan) */
+
+    /* DMABUF_RELAY only — the library owns a single shadow VkImage
+     * shared across all `count` producer buffers; each frame is blit
+     * into it. These describe the shadow's exported DMA-BUF. The fd
+     * is lib-owned and stays valid until the next bind_buffers /
+     * disconnect; consumers MUST dup if they want to outlive that.
+     *   shadow_dmabuf_fd:        -1 outside DMABUF_RELAY
+     *   shadow_n_planes:         1 for the LINEAR-tiled path the
+     *                            library currently uses
+     *   shadow_strides/offsets:  per-plane row-pitch / offset within
+     *                            the dmabuf, length == shadow_n_planes
+     *   shadow_modifier:         DRM_FORMAT_MOD_LINEAR (0) today */
+    int      shadow_dmabuf_fd;
+    uint32_t shadow_n_planes;
+    uint32_t shadow_strides[WAYWALLEN_DMABUF_MAX_PLANES];
+    uint64_t shadow_offsets[WAYWALLEN_DMABUF_MAX_PLANES];
+    uint64_t shadow_modifier;
 } waywallen_textures_t;
 
 typedef struct waywallen_config {
@@ -314,6 +340,27 @@ int waywallen_display_bind_egl(waywallen_display_t *d,
                                const waywallen_egl_ctx_t *ctx);
 int waywallen_display_bind_vulkan(waywallen_display_t *d,
                                   const waywallen_vk_ctx_t *ctx);
+
+/*
+ * Library creates+owns a private Vulkan instance/device/queue,
+ * imports each producer DMA-BUF as a sampled VkImage, allocates a
+ * LINEAR-tiled shadow VkImage whose VkDeviceMemory is exported as
+ * a DMA-BUF, blits the per-frame imported buffer into the shadow
+ * on its own queue, and re-publishes the shadow's DMA-BUF for the
+ * host to import. Suitable for shells whose toolkit (GTK4) can
+ * consume DMA-BUFs but doesn't expose enough of its renderer to
+ * support `bind_vulkan` properly.
+ *
+ * Returns 0 on success, negative WAYWALLEN_ERR_* on failure.
+ * Failure modes: Vulkan loader missing, no GPU with
+ * VK_EXT_external_memory_dma_buf + VK_EXT_image_drm_format_modifier,
+ * no transfer-capable queue.
+ *
+ * After this call the host gets DMABUF_RELAY data in textures_t
+ * (shadow_dmabuf_fd and friends). The {egl,vk}_images arrays stay
+ * NULL — the producer buffers are library-internal in this mode.
+ */
+int waywallen_display_bind_dmabuf_relay(waywallen_display_t *d);
 
 /*
  * Override the DRM render-node id reported during register_display.

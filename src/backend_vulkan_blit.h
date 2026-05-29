@@ -50,10 +50,24 @@ typedef struct ww_vk_blitter {
     PFN_vkWaitForFences          vkWaitForFences;
     PFN_vkQueueSubmit            vkQueueSubmit;
 
+    /* Resolved lazily on first ensure_shadow_exportable; NULL when the
+     * relay path was never used. Required only for DMABUF_RELAY. */
+    PFN_vkGetMemoryFdKHR             vkGetMemoryFdKHR;
+    PFN_vkGetImageSubresourceLayout  vkGetImageSubresourceLayout;
+    PFN_vkGetSemaphoreFdKHR          vkGetSemaphoreFdKHR;
+
     VkCommandPool   pool;
     VkCommandBuffer cb;
     VkFence         fence;
     bool            fence_armed;
+
+    /* Signal semaphore for each blit submission, exportable as SYNC_FD.
+     * After submit, vkGetSemaphoreFdKHR(SYNC_FD) gives us a sync_file
+     * fd which we ioctl-import into the shadow dmabuf's dma_resv as a
+     * DMA_BUF_SYNC_WRITE fence. GSK's later sample submission then
+     * sees fresh content via kernel implicit DMA-BUF sync. Matches the
+     * exact pattern in gsk/gpu/gskgpudownloadop.c. */
+    VkSemaphore     export_sem;
 
     VkImage         shadow_image;
     VkDeviceMemory  shadow_mem;
@@ -90,6 +104,16 @@ typedef struct ww_vk_blitter {
     } pending_shadow_destroy[4];
     int pending_shadow_destroy_count;
 
+    /* DMABUF_RELAY only: exported DMA-BUF fd + per-plane layout for the
+     * current shadow image. `shadow_export_fd = -1` when the shadow was
+     * created via the regular (non-exportable) path. Closed in
+     * shutdown / replaced on every ensure_shadow_exportable call. */
+    int      shadow_export_fd;
+    uint32_t shadow_export_n_planes;
+    uint32_t shadow_export_strides[4];
+    uint64_t shadow_export_offsets[4];
+    uint64_t shadow_export_modifier;
+
     bool initialized;
 } ww_vk_blitter_t;
 
@@ -116,6 +140,41 @@ void ww_vk_blitter_shutdown(ww_vk_blitter_t *b);
  */
 int  ww_vk_blitter_ensure_shadow(ww_vk_blitter_t *b,
                                  uint32_t w, uint32_t h, VkFormat fmt);
+
+/*
+ * Allocate (or reallocate) a LINEAR-tiled, externally-exportable shadow
+ * image. Used by WAYWALLEN_BACKEND_DMABUF_RELAY: the lib re-publishes
+ * the shadow as a DMA-BUF for the host to import via its toolkit
+ * (GdkDmabufTexture / wl_dmabuf).
+ *
+ * After success, the exported DMA-BUF fd + per-plane layout are stored
+ * on the blitter and retrievable via `ww_vk_blitter_get_export`.
+ *
+ * Returns 0 on success, -EIO on any Vulkan failure, -ENOSYS when
+ * vkGetMemoryFdKHR cannot be resolved on the device.
+ */
+int  ww_vk_blitter_ensure_shadow_exportable(ww_vk_blitter_t *b,
+                                            uint32_t w, uint32_t h,
+                                            VkFormat fmt);
+
+/*
+ * Read back the exported DMA-BUF fd + per-plane layout of the current
+ * shadow. The fd is lib-owned — callers MUST `dup(2)` if they want to
+ * outlive the next `ensure_shadow_exportable`/shutdown call.
+ *
+ * `out_strides`/`out_offsets` must be arrays of length
+ * WAYWALLEN_DMABUF_MAX_PLANES (4); only the first `*out_n_planes`
+ * entries are written.
+ *
+ * Returns 0 on success, -EINVAL if no exportable shadow is currently
+ * bound.
+ */
+int  ww_vk_blitter_get_export(const ww_vk_blitter_t *b,
+                              int *out_fd,
+                              uint32_t *out_n_planes,
+                              uint32_t out_strides[4],
+                              uint64_t out_offsets[4],
+                              uint64_t *out_modifier);
 
 /*
  * Copy `imported` (UNDEFINED layout, TRANSFER_SRC contents valid) into

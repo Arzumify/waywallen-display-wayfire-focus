@@ -25,6 +25,7 @@
 #endif
 #ifdef WW_HAVE_VULKAN
 #  include "backend_vulkan.h"
+#  include "backend_vulkan_blit.h"
 #endif
 
 #include <errno.h>
@@ -208,6 +209,12 @@ struct waywallen_display {
     VkSemaphore *vk_semaphores;          /* one per buffer slot */
     /* Released-but-not-yet-destroyed pools (see above). */
     struct ww_vk_pending_pool *vk_pending;
+
+    /* DMABUF_RELAY only: lib-owned VkInstance/Device/Queue + a blitter
+     * that imports producer DMA-BUFs into sampled VkImages and blits
+     * them into a LINEAR-tiled shadow whose DMA-BUF is re-exported. */
+    ww_vk_owned_t   vk_owned;
+    ww_vk_blitter_t vk_blitter;
 #endif
 
     /* Guards `vk_pending` / `egl_pending` against concurrent push from
@@ -579,12 +586,16 @@ static int send_consumer_caps_blocking(waywallen_display_t *d) {
 #endif
 #ifdef WW_HAVE_VULKAN
     case WAYWALLEN_BACKEND_VULKAN:
+    case WAYWALLEN_BACKEND_DMABUF_RELAY:
         if (d->vk_backend.loaded) {
             /* Consumer's blit-out path imports the dma-buf as
              * TRANSFER_SRC and samples from a host-owned shadow image,
              * so the modifier must support both feature bits. SAMPLED
              * stays in the mask because some drivers only return the
-             * right modifier sub-layout when both bits are present. */
+             * right modifier sub-layout when both bits are present.
+             * DMABUF_RELAY uses the same import path internally — its
+             * vk_backend is loaded against the library's owned device,
+             * so the same probe applies. */
             const uint32_t want_features =
                 VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT
                 | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
@@ -739,6 +750,8 @@ waywallen_display_t *waywallen_display_new(const waywallen_display_callbacks_t *
     d->stream = WW_STREAM_INACTIVE;
     d->backend = WAYWALLEN_BACKEND_NONE;
     d->hs_state = WW_HS_IDLE;
+    /* 0 is a valid fd; shadow_dmabuf_fd "unset" sentinel must be -1. */
+    d->current_textures.shadow_dmabuf_fd = -1;
     ww_codec_recv_state_init(&d->hs_recv);
     if (pthread_mutex_init(&d->pending_mutex, NULL) != 0) {
         free(d);
@@ -907,6 +920,62 @@ int waywallen_display_bind_vulkan(waywallen_display_t *d,
     }
 #endif
     return WAYWALLEN_OK;
+}
+
+int waywallen_display_bind_dmabuf_relay(waywallen_display_t *d) {
+    if (!d) return WAYWALLEN_ERR_INVAL;
+    if (d->conn != WW_CONN_DISCONNECTED) return WAYWALLEN_ERR_STATE;
+#ifdef WW_HAVE_VULKAN
+    int rc = ww_vk_create_owned(&d->vk_owned);
+    if (rc == -ENOENT) return WAYWALLEN_ERR_NOMEM;
+    if (rc == -ENOSYS) return WAYWALLEN_ERR_NOT_IMPL;
+    if (rc != 0) return WAYWALLEN_ERR_IO;
+
+    /* Wire vk_backend with the lib-owned handles so the existing
+     * import + sync paths work unchanged. install_debug_utils=true
+     * here — nobody else is mounted on this VkInstance. */
+    rc = ww_vk_backend_load(&d->vk_backend,
+                            d->vk_owned.instance,
+                            d->vk_owned.physical_device,
+                            d->vk_owned.device,
+                            d->vk_owned.queue_family_index,
+                            NULL, /* host_get_proc: use dlopen path */
+                            true);
+    if (rc != 0) {
+        ww_log(WAYWALLEN_LOG_ERROR, "vk relay: backend load failed: %d", rc);
+        ww_vk_destroy_owned(&d->vk_owned);
+        return WAYWALLEN_ERR_NOT_IMPL;
+    }
+
+    rc = ww_vk_blitter_init(&d->vk_blitter,
+                            d->vk_owned.instance,
+                            d->vk_owned.physical_device,
+                            d->vk_owned.device,
+                            d->vk_owned.queue_family_index,
+                            d->vk_owned.queue,
+                            NULL);
+    if (rc != 0) {
+        ww_log(WAYWALLEN_LOG_ERROR, "vk relay: blitter init failed: %d", rc);
+        ww_vk_backend_unload(&d->vk_backend);
+        ww_vk_destroy_owned(&d->vk_owned);
+        return WAYWALLEN_ERR_NOT_IMPL;
+    }
+
+    d->backend = WAYWALLEN_BACKEND_DMABUF_RELAY;
+    if (d->hs_drm_render_major == 0 && d->hs_drm_render_minor == 0) {
+        uint32_t major = 0, minor = 0;
+        if (ww_vk_query_drm_render_node(&d->vk_backend, &major, &minor) == 0) {
+            d->hs_drm_render_major = major;
+            d->hs_drm_render_minor = minor;
+            ww_log(WAYWALLEN_LOG_INFO,
+                   "vk relay drm render node = %u:%u", major, minor);
+        }
+    }
+    return WAYWALLEN_OK;
+#else
+    (void)d;
+    return WAYWALLEN_ERR_NOT_IMPL;
+#endif
 }
 
 int waywallen_display_set_drm_render_node(waywallen_display_t *d,
@@ -1662,6 +1731,8 @@ static void fire_textures_releasing_if_any(waywallen_display_t *d) {
     free(d->current_textures.vk_images);
     free(d->current_textures.vk_memories);
     memset(&d->current_textures, 0, sizeof(d->current_textures));
+    /* Re-arm the sentinel after the memset zeroes it. */
+    d->current_textures.shadow_dmabuf_fd = -1;
     d->has_textures = false;
 }
 
@@ -1894,6 +1965,44 @@ static int handle_bind_buffers(waywallen_display_t *d,
             ww_log(WAYWALLEN_LOG_WARN, "Vulkan import failed: %d", ir);
         }
     }
+    if (!fds_consumed && d->backend == WAYWALLEN_BACKEND_DMABUF_RELAY
+        && d->vk_backend.loaded) {
+        int ir = try_vk_import(d, &bb, fd_buf, n_fds);
+        if (ir == 0) {
+            VkFormat shadow_fmt = ww_fourcc_to_vk_format(bb.fourcc);
+            int sr = ww_vk_blitter_ensure_shadow_exportable(
+                &d->vk_blitter, bb.width, bb.height, shadow_fmt);
+            if (sr == 0) {
+                int sfd = -1;
+                uint32_t sn = 0;
+                uint32_t sstr[WAYWALLEN_DMABUF_MAX_PLANES] = {0};
+                uint64_t soff[WAYWALLEN_DMABUF_MAX_PLANES] = {0};
+                uint64_t smod = 0;
+                if (ww_vk_blitter_get_export(&d->vk_blitter, &sfd, &sn,
+                                              sstr, soff, &smod) == 0) {
+                    d->current_textures.shadow_dmabuf_fd = sfd;
+                    d->current_textures.shadow_n_planes  = sn;
+                    for (uint32_t i = 0;
+                         i < sn && i < WAYWALLEN_DMABUF_MAX_PLANES; i++) {
+                        d->current_textures.shadow_strides[i] = sstr[i];
+                        d->current_textures.shadow_offsets[i] = soff[i];
+                    }
+                    d->current_textures.shadow_modifier = smod;
+                }
+                ww_log(WAYWALLEN_LOG_INFO,
+                       "dmabuf_relay: shadow ready %ux%u fourcc=0x%x fd=%d",
+                       bb.width, bb.height, bb.fourcc, sfd);
+                reported_backend = WAYWALLEN_BACKEND_DMABUF_RELAY;
+                fds_consumed = 1;
+            } else {
+                ww_log(WAYWALLEN_LOG_WARN,
+                       "dmabuf_relay: ensure_shadow_exportable failed: %d", sr);
+            }
+        } else {
+            ww_log(WAYWALLEN_LOG_WARN,
+                   "dmabuf_relay: producer import failed: %d", ir);
+        }
+    }
 #endif
     if (!fds_consumed) {
         ww_log(WAYWALLEN_LOG_WARN, "no backend imported buffers");
@@ -2028,6 +2137,43 @@ static int handle_frame_ready(waywallen_display_t *d,
         }
         fd_handled = 1;
     }
+    if (!fd_handled && d->backend == WAYWALLEN_BACKEND_DMABUF_RELAY
+        && d->vk_backend.loaded && d->vk_semaphores
+        && ww_vk_blitter_initialized(&d->vk_blitter)) {
+        uint32_t slot = fr.buffer_index;
+        VkSemaphore acq_sem = VK_NULL_HANDLE;
+        if (slot < d->vk_import_count
+            && d->vk_semaphores[slot] != VK_NULL_HANDLE) {
+            int rc = ww_vk_import_sync_fd(&d->vk_backend,
+                                          d->vk_semaphores[slot],
+                                          acquire_fd);
+            if (rc == 0) {
+                acq_sem = d->vk_semaphores[slot];
+            } else {
+                close(acquire_fd);
+            }
+        } else {
+            close(acquire_fd);
+        }
+        if (slot < d->vk_import_count
+            && d->vk_images[slot].image != VK_NULL_HANDLE) {
+            /* Blit consumes release_syncobj_fd (signals + close) on its
+             * own success/failure paths — pass ownership through. */
+            (void)ww_vk_blitter_blit(&d->vk_blitter,
+                                     d->vk_images[slot].image,
+                                     d->current_textures.tex_width,
+                                     d->current_textures.tex_height,
+                                     acq_sem,
+                                     release_syncobj_fd);
+        } else if (release_syncobj_fd >= 0) {
+            /* No image to blit — still need to release. */
+            (void)waywallen_display_signal_release_syncobj(release_syncobj_fd);
+        }
+        /* The lib already drove sync to completion; host sees no sem +
+         * no release fd to deal with. */
+        release_syncobj_fd = -1;
+        fd_handled = 1;
+    }
 #endif
     if (!fd_handled) {
         close(acquire_fd);
@@ -2038,7 +2184,8 @@ static int handle_frame_ready(waywallen_display_t *d,
     frame.seq = fr.seq;
     frame.vk_acquire_semaphore = acquire_semaphore;
     /* Hand the raw release_syncobj fd to the host. Ownership transfers:
-     * the host MUST signal it from its release GPU work and then close. */
+     * the host MUST signal it from its release GPU work and then close.
+     * DMABUF_RELAY mode sets this to -1: the lib already signaled. */
     frame.release_syncobj_fd = release_syncobj_fd;
     ww_evt_frame_ready_free(&fr);
 
@@ -2258,6 +2405,16 @@ void waywallen_display_close(waywallen_display_t *d) {
         d->fd = -1;
     }
     fire_textures_releasing_if_any(d);
+#ifdef WW_HAVE_VULKAN
+    /* DMABUF_RELAY: tear down the lib-owned VK stack here while we
+     * still hold the only thread that's been touching it. Order:
+     * blitter (uses vk_backend) → vk_backend unload → owned destroy. */
+    if (d->backend == WAYWALLEN_BACKEND_DMABUF_RELAY) {
+        ww_vk_blitter_shutdown(&d->vk_blitter);
+        ww_vk_backend_unload(&d->vk_backend);
+        ww_vk_destroy_owned(&d->vk_owned);
+    }
+#endif
     d->conn = WW_CONN_DISCONNECTED;
     d->stream = WW_STREAM_INACTIVE;
     d->hs_state = WW_HS_IDLE;

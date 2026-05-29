@@ -1,36 +1,55 @@
 #!/usr/bin/env -S gjs -m
 //
-// waywallen-display-gnome-renderer
-//
-// One Gtk.ApplicationWindow per Gdk.Monitor; each window holds a
-// Gtk.Picture whose paintable is swapped per-frame to a GdkGLTexture
-// wrapping the GL texture libwaywallen_display imported from the daemon.
-// GTK 4.12+'s GdkGLTextureBuilder lets us hand a GL texture id (created
-// in our own GdkGLContext) to GTK without writing any GL drawing code
-// in JS — GTK does the cross-context wait + final blit internally.
-//
-// Lifetime / fd ownership is documented inline at every transfer.
+// One Gtk.ApplicationWindow per Gdk.Monitor. The wallpaper DMA-BUF is
+// imported and presented through Waywallen.ShadowPaintable (the C
+// wrapper owns the GdkTexture lifetime — doing it in JS leaked because
+// GJS GC is lazy and GSK never evicted the cached VkImages).
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Gdk from 'gi://Gdk?version=4.0';
 import Gtk from 'gi://Gtk?version=4.0';
-import GdkWayland from 'gi://GdkWayland?version=4.0';
 import Waywallen from 'gi://Waywallen?version=1.0';
+import cairo from 'cairo';
 import system from 'system';
+
+// GLib.unix_fd_source_new moved to GLibUnix.fd_source_new in gjs 1.86+.
+let GLibUnix = null;
+try { GLibUnix = imports.gi.GLibUnix; } catch (_e) {}
 
 const APP_ID = 'io.github.waywallen.WaywallenRenderer';
 
-// Mirrors the values exposed in WwHandshakeResult.
+// WwHandshakeResult / WwHandshakeState values.
 const HS_DONE = 1;
-const HS_NEED_READ = 2;
 const HS_NEED_WRITE = 3;
-const HS_PROGRESS = 4;
-
-const HS_READY = 6; // WwHandshakeState.READY
+const HS_READY = 6;
 
 function logIndexed(idx, msg) {
     printerr(`[ww-renderer ${idx}] ${msg}`);
+}
+
+function addFdWatch(fd, condition, callback) {
+    const newSource = GLibUnix?.fd_source_new ?? GLib.unix_fd_source_new;
+    const source = newSource(fd, condition);
+    source.set_callback(callback);
+    return source.attach(null);
+}
+
+// Stable per-monitor suffix for the daemon's instance-id / display-name,
+// so each physical monitor gets its own per-display settings slot. Prefer
+// the connector name (DP-1, HDMI-A-1, …); fall back to manufacturer+model,
+// then the enumeration index. Survives reorder/replug like the KDE plugin
+// (identical monitors swapped between connectors swap wallpapers — same
+// caveat as KDE).
+function monitorKey(monitor, index) {
+    const conn = monitor.get_connector?.();
+    if (conn)
+        return conn;
+    const mfg = monitor.get_manufacturer?.() ?? '';
+    const model = monitor.get_model?.() ?? '';
+    if (mfg || model)
+        return `${mfg}-${model}`;
+    return `mon${index}`;
 }
 
 function parseArgs(argv) {
@@ -58,24 +77,20 @@ class MonitorRenderer {
         this._index = monitorIndex;
         this._opts = opts;
 
+        // Per-monitor identity: base id/name + stable monitor key, so the
+        // daemon keys settings per physical monitor instead of collapsing
+        // every output onto one display.
+        const key = monitorKey(monitor, monitorIndex);
+        this._instanceId = opts.instanceId ? `${opts.instanceId}:${key}` : '';
+        this._displayName = `${opts.displayName}:${key}`;
+
         this._window = null;
         this._picture = null;
-        this._glContext = null;
         this._display = null;
 
         this._inSourceId = 0;
         this._outSourceId = 0;
-
-        this._textureCount = 0;
-        this._texWidth = 0;
-        this._texHeight = 0;
-        this._glTextures = [];
-
-        // Lazy-release: hold previous frame's release_fd until next
-        // frame_ready arrives, then signal it. Buys one extra frame of
-        // worst-case latency for the daemon's reaper but lets GTK finish
-        // sampling the previous texture before the buffer is reused.
-        this._prevReleaseFd = -1;
+        this._paintable = null;
 
         this._destroyed = false;
     }
@@ -87,26 +102,29 @@ class MonitorRenderer {
             resizable: false,
         });
 
-        // Title is consumed by the gnome-shell extension to identify
-        // this window's monitor. JSON payload is reserved for future
-        // hint flags.
-        const titleHint = JSON.stringify({});
+        // Title hint consumed by windowManager.js: keepMinimized keeps the
+        // actor off the stage (so it doesn't cover the panel) while the
+        // wl_surface stays live for Clutter.Clone to mirror.
+        const titleHint = JSON.stringify({
+            keepMinimized: true,
+            keepAtBottom: true,
+            keepPosition: true,
+        });
         this._window.set_title(`@${APP_ID}!${titleHint}|${this._index}`);
 
+        const geom = this._monitor.get_geometry();
+        // Pin the size: a minimized Wayland window gets no configure with a
+        // real allocation, so without an explicit request Gtk.Picture
+        // measures height as Infinity and gsk commits a degenerate buffer.
         this._picture = new Gtk.Picture({
             can_shrink: true,
-            content_fit: Gtk.ContentFit.COVER,
-            hexpand: true,
-            vexpand: true,
+            content_fit: Gtk.ContentFit.FILL,
+            width_request: geom.width,
+            height_request: geom.height,
         });
         this._window.set_child(this._picture);
-
-        const geom = this._monitor.get_geometry();
         this._window.set_default_size(geom.width, geom.height);
 
-        // realize fires synchronously inside present() on Wayland. Hook
-        // it before present() so we can fullscreen-on-monitor on the
-        // first map.
         this._window.connect('realize', () => this._onRealize());
         this._window.fullscreen_on_monitor(this._monitor);
         this._window.present();
@@ -114,38 +132,35 @@ class MonitorRenderer {
 
     _onRealize() {
         try {
+            // Disable input two ways: widget-level can_target stops GTK
+            // dispatching clicks, empty wl_surface input region stops
+            // mutter's implicit pointer grab from locking the user out.
+            this._window.set_can_target(false);
+            this._window.set_can_focus(false);
+            if (this._picture) {
+                this._picture.set_can_target(false);
+                this._picture.set_can_focus(false);
+            }
+            const surface = this._window.get_surface();
+            if (surface?.set_input_region) {
+                try {
+                    surface.set_input_region(new cairo.Region());
+                } catch (e) {
+                    logIndexed(this._index, `set_input_region failed: ${e}`);
+                }
+            }
             this._initWaywallen();
         } catch (e) {
             logIndexed(this._index, `init failed: ${e}`);
-            this._exit(1);
+            this._exit();
         }
     }
 
     _initWaywallen() {
-        const surface = this._window.get_surface();
-        if (!surface)
-            throw new Error('window has no surface yet');
-
-        // Our own GL context, used only to call create_gl_texture in.
-        // Sharing the EGLDisplay with GTK's compositor context lets GTK
-        // sample these textures cross-context.
-        const ctx = surface.create_gl_context();
-        ctx.realize();
-        ctx.make_current();
-        this._glContext = ctx;
-
-        // EGLDisplay handle. GdkWaylandDisplay is a subclass of GdkDisplay
-        // when running on Wayland; the prototype-call pattern works
-        // because the actual instance IS a WaylandDisplay.
-        const gdkDisplay = Gdk.Display.get_default();
-        const eglDisplay = GdkWayland.WaylandDisplay.prototype
-            .get_egl_display.call(gdkDisplay);
-        if (!eglDisplay)
-            throw new Error('GdkWaylandDisplay has no EGLDisplay');
-
+        logIndexed(this._index, `display=${this._displayName} id=${this._instanceId}`);
         const d = Waywallen.Display.new();
-        if (!d.bind_egl(eglDisplay, null))
-            throw new Error('Waywallen.Display.bind_egl failed');
+        if (!d.bind_dmabuf_relay())
+            throw new Error('bind_dmabuf_relay failed');
         this._display = d;
 
         d.connect('textures-ready',
@@ -160,8 +175,8 @@ class MonitorRenderer {
         const geom = this._monitor.get_geometry();
         const refreshMhz = this._monitor.get_refresh_rate() || 60000;
         if (!d.begin_connect(this._opts.socketPath,
-                             this._opts.displayName,
-                             this._opts.instanceId,
+                             this._displayName,
+                             this._instanceId,
                              geom.width, geom.height, refreshMhz))
             throw new Error('begin_connect failed');
 
@@ -169,20 +184,18 @@ class MonitorRenderer {
         if (fd < 0)
             throw new Error('display fd is -1 after begin_connect');
 
-        // Always watch for readability; advance_handshake's NEED_WRITE
-        // toggles the OUT watch.
-        this._inSourceId = GLib.unix_fd_add(GLib.PRIORITY_DEFAULT, fd,
-                                            GLib.IOCondition.IN,
-                                            () => this._driveIO());
+        // Watch readability always; _setOutWatch toggles the OUT watch
+        // when the handshake needs to write.
+        this._inSourceId = addFdWatch(fd, GLib.IOCondition.IN,
+                                      () => this._driveIO());
         this._driveIO();
     }
 
     _setOutWatch(want) {
         const fd = this._display ? this._display.get_fd() : -1;
         if (want && this._outSourceId === 0 && fd >= 0) {
-            this._outSourceId = GLib.unix_fd_add(GLib.PRIORITY_DEFAULT, fd,
-                                                  GLib.IOCondition.OUT,
-                                                  () => this._driveIO());
+            this._outSourceId = addFdWatch(fd, GLib.IOCondition.OUT,
+                                           () => this._driveIO());
         } else if (!want && this._outSourceId !== 0) {
             GLib.source_remove(this._outSourceId);
             this._outSourceId = 0;
@@ -199,10 +212,8 @@ class MonitorRenderer {
                 return GLib.SOURCE_REMOVE;
             }
             this._setOutWatch(r === HS_NEED_WRITE);
-            // PROGRESS, NEED_READ, NEED_WRITE all keep waiting on poll.
-            // DONE means transitioned to READY this iteration; loop into
-            // dispatch immediately so we don't drop the first batch of
-            // frames already buffered on the socket.
+            // Only DONE means we reached READY this round; otherwise keep
+            // polling. Fall through to dispatch on DONE.
             if (r !== HS_DONE)
                 return GLib.SOURCE_CONTINUE;
             this._setOutWatch(false);
@@ -215,89 +226,45 @@ class MonitorRenderer {
         return GLib.SOURCE_CONTINUE;
     }
 
-    _onTexturesReady(count, w, h, fourcc, modifier, backend) {
-        logIndexed(this._index,
-            `textures-ready: count=${count} ${w}x${h} ` +
-            `fourcc=0x${fourcc.toString(16)} backend=${backend}`);
-
-        this._releaseGlTextures();
-        this._texWidth = w;
-        this._texHeight = h;
-        this._textureCount = count;
-
-        this._glContext.make_current();
-        for (let i = 0; i < count; i++) {
-            const [ok, tex] = this._display.create_gl_texture(i);
-            if (!ok) {
-                logIndexed(this._index, `create_gl_texture(${i}) failed`);
-                this._glTextures.push(0);
-            } else {
-                this._glTextures.push(tex);
-            }
+    _onTexturesReady(count, w, h, fourcc, _modifier, backend) {
+        const [ok, sfd, nPlanes, strides, offsets, smod] =
+            this._display.get_shadow_export();
+        if (!ok) {
+            logIndexed(this._index, 'get_shadow_export failed');
+            return;
         }
+        if (!this._paintable) {
+            this._paintable = Waywallen.ShadowPaintable.new();
+            this._picture.set_paintable(this._paintable);
+        }
+        // set_shadow takes ownership of the fd.
+        this._paintable.set_shadow(sfd, nPlanes, w, h, fourcc, smod,
+                                   strides, offsets);
+        logIndexed(this._index,
+            `bound shadow ${w}x${h} fourcc=0x${fourcc.toString(16)} ` +
+            `count=${count} backend=${backend}`);
     }
 
     _onTexturesReleasing() {
-        logIndexed(this._index, 'textures-releasing');
-        // Drop any displayed paintable first so GTK lets go of the
-        // texture before we delete the underlying GL name.
-        if (this._picture)
-            this._picture.set_paintable(null);
-        this._releaseGlTextures();
+        this._paintable?.clear();
     }
 
-    _releaseGlTextures() {
-        if (!this._display)
-            return;
-        for (let i = 0; i < this._glTextures.length; i++) {
-            if (this._glTextures[i])
-                this._display.delete_gl_texture(i);
-        }
-        this._glTextures = [];
-        this._textureCount = 0;
-    }
-
-    _onFrameReady(idx, seq, fd) {
-        // Lazy release: signal previous frame's fd now that we're
-        // about to swap to a new one. The previous frame has already
-        // been handed to GTK.set_paintable; by the time the next
-        // frame arrives, GTK has long finished sampling it.
-        if (this._prevReleaseFd >= 0) {
-            Waywallen.Display.signal_release_syncobj(this._prevReleaseFd);
-            this._prevReleaseFd = -1;
-        }
-        this._prevReleaseFd = Waywallen.Display.dup_release_fd(fd);
-
-        if (idx >= this._glTextures.length || !this._glTextures[idx])
-            return;
-
-        const builder = new Gdk.GLTextureBuilder();
-        builder.set_context(this._glContext);
-        builder.set_id(this._glTextures[idx]);
-        builder.set_width(this._texWidth);
-        builder.set_height(this._texHeight);
-        // Daemon's textures are sRGB-typed BGRA8; if the host's fourcc
-        // ever deviates we'll need a switch on the textures-ready code.
-        builder.set_format(Gdk.MemoryFormat.B8G8R8A8);
-        const tex = builder.build(null);
-        this._picture.set_paintable(tex);
+    _onFrameReady(_idx, _seq, fd) {
+        if (fd >= 0)
+            Waywallen.Display.close_fd(fd);
+        this._paintable?.refresh();
     }
 
     _onDisconnected(code, msg) {
         logIndexed(this._index, `disconnected: code=${code} msg=${msg}`);
-        // Quit the whole app: extension respawns us.
-        this._exit(0);
+        this._exit();  // extension respawns us
     }
 
-    _exit(code) {
+    _exit() {
         if (this._destroyed)
             return;
         this._destroyed = true;
-        const app = Gtk.Application.get_default();
-        if (app)
-            app.quit();
-        // Code propagation isn't guaranteed via Gtk.Application.quit but
-        // ARGV exit hooks below handle it on the activate path.
+        Gtk.Application.get_default()?.quit();
     }
 
     destroy() {
@@ -312,14 +279,13 @@ class MonitorRenderer {
             GLib.source_remove(this._outSourceId);
             this._outSourceId = 0;
         }
-        if (this._prevReleaseFd >= 0) {
-            Waywallen.Display.close_fd(this._prevReleaseFd);
-            this._prevReleaseFd = -1;
-        }
         if (this._picture)
             this._picture.set_paintable(null);
+        if (this._paintable) {
+            this._paintable.clear();
+            this._paintable = null;
+        }
         if (this._display) {
-            this._releaseGlTextures();
             this._display.disconnect();
             this._display = null;
         }

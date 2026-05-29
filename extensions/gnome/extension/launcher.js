@@ -5,9 +5,16 @@ import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 const shellMajor = parseInt(Config.PACKAGE_VERSION.split('.')[0]);
 
+// GNOME 49 dropped Meta.is_wayland_compositor(); fall back to WAYLAND_DISPLAY.
+function isWaylandSession() {
+    if (typeof Meta.is_wayland_compositor === 'function')
+        return Meta.is_wayland_compositor();
+    return !!GLib.getenv('WAYLAND_DISPLAY');
+}
+
 export class LaunchSubprocess {
     constructor(flags = Gio.SubprocessFlags.NONE) {
-        this._isX11 = !Meta.is_wayland_compositor();
+        this._isX11 = !isWaylandSession();
         this._flags = flags
             | Gio.SubprocessFlags.STDOUT_PIPE
             | Gio.SubprocessFlags.STDERR_MERGE;
@@ -55,6 +62,25 @@ export class LaunchSubprocess {
     set_cwd(cwd) {
         if (this._launcher)
             this._launcher.set_cwd(cwd);
+    }
+
+    /**
+     * Prepend a colon-separated entry to an env var, preserving any
+     * existing value. Used to point gjs at the bundled typelib / .so
+     * shipped inside the extension zip.
+     */
+    prepend_env(name, value) {
+        if (!this._launcher || !value)
+            return;
+        const old = GLib.getenv(name);
+        const next = old && old.length > 0 ? `${value}:${old}` : value;
+        this._launcher.setenv(name, next, true);
+    }
+
+    set_env(name, value) {
+        if (!this._launcher)
+            return;
+        this._launcher.setenv(name, value, true);
     }
 
     _readOutput() {

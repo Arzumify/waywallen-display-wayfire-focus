@@ -2,12 +2,23 @@
 
 #include <waywallen_display.h>
 
+#include <dlfcn.h>
 #include <unistd.h>
 
 struct _WwDisplay {
     GObject parent_instance;
     waywallen_display_t *handle;
     gboolean connected;
+    /* DMABUF_RELAY: snapshot of the most recent textures_ready's
+     * shadow descriptor. Filled in the trampoline; consumers read via
+     * ww_display_get_shadow_export. fd is lib-owned — wrapper dups on
+     * the way out. */
+    gint     shadow_fd;
+    guint    shadow_n_planes;
+    guint    shadow_strides[4];
+    guint64  shadow_offsets[4];
+    guint64  shadow_modifier;
+    gboolean shadow_valid;
 };
 
 G_DEFINE_FINAL_TYPE(WwDisplay, ww_display, G_TYPE_OBJECT)
@@ -27,6 +38,22 @@ static void
 on_textures_ready_cb(void *user_data, const waywallen_textures_t *t)
 {
     WwDisplay *self = WW_DISPLAY(user_data);
+    /* Snapshot the shadow descriptor while the textures_t is still
+     * the lib's live copy. Always refresh — relay rebinds change the
+     * shadow fd. */
+    self->shadow_valid = FALSE;
+    self->shadow_fd = t->shadow_dmabuf_fd;
+    self->shadow_n_planes = (guint)t->shadow_n_planes;
+    self->shadow_modifier = t->shadow_modifier;
+    for (guint i = 0; i < 4; i++) {
+        self->shadow_strides[i] = (i < t->shadow_n_planes)
+            ? (guint)t->shadow_strides[i] : 0u;
+        self->shadow_offsets[i] = (i < t->shadow_n_planes)
+            ? t->shadow_offsets[i] : 0ull;
+    }
+    if (t->shadow_dmabuf_fd >= 0 && t->shadow_n_planes > 0) {
+        self->shadow_valid = TRUE;
+    }
     g_signal_emit(self, signals[SIGNAL_TEXTURES_READY], 0,
                   (guint)t->count,
                   (guint)t->tex_width,
@@ -41,6 +68,9 @@ on_textures_releasing_cb(void *user_data, const waywallen_textures_t *t)
 {
     (void)t;
     WwDisplay *self = WW_DISPLAY(user_data);
+    self->shadow_valid = FALSE;
+    self->shadow_fd = -1;
+    self->shadow_n_planes = 0;
     g_signal_emit(self, signals[SIGNAL_TEXTURES_RELEASING], 0);
 }
 
@@ -171,6 +201,10 @@ ww_display_init(WwDisplay *self)
     };
     self->handle = waywallen_display_new(&cb);
     self->connected = FALSE;
+    self->shadow_fd = -1;
+    self->shadow_n_planes = 0;
+    self->shadow_modifier = 0;
+    self->shadow_valid = FALSE;
 }
 
 WwDisplay *
@@ -192,6 +226,54 @@ ww_display_bind_egl(WwDisplay *self,
         .get_proc_address = (void *(*)(const char *))get_proc_address,
     };
     return waywallen_display_bind_egl(self->handle, &ctx) == WAYWALLEN_OK;
+}
+
+gboolean
+ww_display_bind_dmabuf_relay(WwDisplay *self)
+{
+    g_return_val_if_fail(WW_IS_DISPLAY(self), FALSE);
+    g_return_val_if_fail(self->handle != NULL, FALSE);
+    return waywallen_display_bind_dmabuf_relay(self->handle) == WAYWALLEN_OK;
+}
+
+gboolean
+ww_display_get_shadow_export(WwDisplay *self,
+                             gint *out_fd,
+                             guint *out_n_planes,
+                             guint out_strides[4],
+                             guint64 out_offsets[4],
+                             guint64 *out_modifier)
+{
+    g_return_val_if_fail(WW_IS_DISPLAY(self), FALSE);
+    g_return_val_if_fail(out_fd != NULL, FALSE);
+    g_return_val_if_fail(out_n_planes != NULL, FALSE);
+    g_return_val_if_fail(out_strides != NULL, FALSE);
+    g_return_val_if_fail(out_offsets != NULL, FALSE);
+    g_return_val_if_fail(out_modifier != NULL, FALSE);
+    if (!self->shadow_valid || self->shadow_fd < 0) {
+        *out_fd = -1;
+        *out_n_planes = 0;
+        *out_modifier = 0;
+        for (guint i = 0; i < 4; i++) {
+            out_strides[i] = 0;
+            out_offsets[i] = 0;
+        }
+        return FALSE;
+    }
+    /* dup so callers get an fd they own. */
+    int dup_fd = dup(self->shadow_fd);
+    if (dup_fd < 0) {
+        *out_fd = -1;
+        return FALSE;
+    }
+    *out_fd = dup_fd;
+    *out_n_planes = self->shadow_n_planes;
+    *out_modifier = self->shadow_modifier;
+    for (guint i = 0; i < 4; i++) {
+        out_strides[i] = self->shadow_strides[i];
+        out_offsets[i] = self->shadow_offsets[i];
+    }
+    return TRUE;
 }
 
 gboolean
@@ -316,6 +398,44 @@ ww_display_close_fd(gint fd)
 {
     if (fd >= 0)
         close(fd);
+}
+
+/* gdk_dmabuf_texture_builder_build has a broken GIR annotation
+ * (DestroyNotify with no associated callback), so GJS refuses to
+ * call it. Resolve the symbol via RTLD_DEFAULT — gtk-4 is already
+ * loaded in the renderer process because JS imported gi://Gdk — and
+ * invoke it with NULL destroy/data. The library itself does NOT link
+ * against gtk-4 (otherwise libwaywallen-gobject would force a gtk dep
+ * on every consumer). */
+typedef GObject *(*gdk_dmabuf_build_fn)(GObject *, GDestroyNotify,
+                                         gpointer, GError **);
+
+GObject *
+ww_display_dmabuf_texture_build(GObject *builder)
+{
+    static gdk_dmabuf_build_fn fn = NULL;
+    if (!fn) {
+        fn = (gdk_dmabuf_build_fn) dlsym(RTLD_DEFAULT,
+            "gdk_dmabuf_texture_builder_build");
+        if (!fn) {
+            g_warning("ww_display_dmabuf_texture_build: "
+                      "gdk_dmabuf_texture_builder_build not in any "
+                      "loaded library — is gtk-4 imported?");
+            return NULL;
+        }
+    }
+    if (!builder) {
+        g_warning("ww_display_dmabuf_texture_build: NULL builder");
+        return NULL;
+    }
+    GError *err = NULL;
+    GObject *tex = fn(builder, NULL, NULL, &err);
+    if (!tex) {
+        g_warning("dmabuf_texture_build failed: %s",
+                  err ? err->message : "(no error)");
+        g_clear_error(&err);
+    }
+    return tex;
 }
 
 void
