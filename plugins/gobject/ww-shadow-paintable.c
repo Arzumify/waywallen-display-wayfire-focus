@@ -146,12 +146,28 @@ snapshot_vfunc(GdkPaintable *paintable,
 {
     WwShadowPaintable *self = WW_SHADOW_PAINTABLE(paintable);
     GtkSnapshot *s = GTK_SNAPSHOT(snapshot);
+    if (!isfinite(width) || width <= 0.0)
+        width = self->width ? (double)self->width : 0.0;
+    if (!isfinite(height) || height <= 0.0)
+        height = self->height ? (double)self->height : 0.0;
+    if (width <= 0.0 || height <= 0.0)
+        return;
+
+    /* Base layer: clear color over the whole surface (a solid fill is
+     * rotation-invariant, so no need to do it in pre-rotation space).
+     * Default opaque black until set_config; this is what shows before
+     * the first frame and in letterbox bars — without it the GTK window
+     * background would leak through. */
+    if (self->clear[3] > 0.0f) {
+        GdkRGBA bg = { self->clear[0], self->clear[1],
+                       self->clear[2], self->clear[3] };
+        graphene_rect_t full;
+        graphene_rect_init(&full, 0.0f, 0.0f, (float)width, (float)height);
+        gtk_snapshot_append_color(s, &bg, &full);
+    }
+
     if (!self->tex)
         return;
-    if (!isfinite(width) || width <= 0.0)
-        width = (double)self->width;
-    if (!isfinite(height) || height <= 0.0)
-        height = (double)self->height;
 
     if (!self->have_config) {
         graphene_rect_t rect;
@@ -163,7 +179,7 @@ snapshot_vfunc(GdkPaintable *paintable,
     /* dst is in pre-rotation display space; for 90/270 that space has
      * swapped W/H. Rotate the canvas about the widget centre so the
      * pre-rotation drawing lands on the physical display, then draw
-     * src→dst there. */
+     * src→dst on top of the clear base. */
     int t = (int)self->transform;
     gboolean swap = (t == 1 || t == 3 || t == 5 || t == 7);
     float preW = swap ? (float)height : (float)width;
@@ -183,13 +199,6 @@ snapshot_vfunc(GdkPaintable *paintable,
     graphene_point_init(&c, -preW / 2.0f, -preH / 2.0f);
     gtk_snapshot_translate(s, &c);
 
-    if (self->clear[3] > 0.0f) {
-        GdkRGBA bg = { self->clear[0], self->clear[1],
-                       self->clear[2], self->clear[3] };
-        graphene_rect_t full;
-        graphene_rect_init(&full, 0.0f, 0.0f, preW, preH);
-        gtk_snapshot_append_color(s, &bg, &full);
-    }
     draw_src_to_dst(self, s, self->src, self->dst);
 
     gtk_snapshot_restore(s);
@@ -229,6 +238,10 @@ static void
 ww_shadow_paintable_init(WwShadowPaintable *self)
 {
     self->fd = -1;
+    /* Default letterbox / pre-content background: opaque black. The
+     * daemon overrides via set_config; this is what shows before any
+     * content and behind a partial-coverage fill mode. */
+    self->clear[3] = 1.0f;
 }
 
 static void

@@ -125,6 +125,11 @@ class MonitorRenderer {
             width_request: geom.width,
             height_request: geom.height,
         });
+        // Attach the paintable up front so it fills the clear color (opaque
+        // black by default) from the first frame — otherwise the GTK window
+        // background shows during the ~seconds before the first bind.
+        this._paintable = Waywallen.ShadowPaintable.new();
+        this._picture.set_paintable(this._paintable);
         this._window.set_child(this._picture);
         this._window.set_default_size(geom.width, geom.height);
 
@@ -240,11 +245,8 @@ class MonitorRenderer {
             logIndexed(this._index, 'get_shadow_export failed');
             return;
         }
-        if (!this._paintable) {
-            this._paintable = Waywallen.ShadowPaintable.new();
-            this._picture.set_paintable(this._paintable);
-        }
-        // set_shadow takes ownership of the fd.
+        // set_shadow takes ownership of the fd. Paintable was created in
+        // build() so it's already painting the clear color.
         this._paintable.set_shadow(sfd, nPlanes, w, h, fourcc, smod,
                                    strides, offsets);
         logIndexed(this._index,
@@ -253,7 +255,10 @@ class MonitorRenderer {
     }
 
     _onTexturesReleasing() {
-        this._paintable?.clear();
+        // Keep showing the last frame. The shadow is our own image (a
+        // copy of the producer buffer), so it survives the producer
+        // unbind; the next textures-ready swaps in fresh content. Clearing
+        // here would flash white across a re-bind / format renegotiation.
     }
 
     _onFrameReady(_idx, _seq, fd) {

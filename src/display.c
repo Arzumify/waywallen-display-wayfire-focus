@@ -723,19 +723,6 @@ static int enc_bye(const void *m, ww_buf_t *out) {
     return ww_req_bye_encode((const ww_req_bye_t *)m, out);
 }
 
-/* Receive the next event frame. `body_buf` must be ≥ WW_CODEC_MAX_BODY_BYTES.
- * Returns 0 on success and fills the out-params. */
-static int recv_event_frame(waywallen_display_t *d,
-                            uint16_t *op,
-                            uint8_t *body_buf, size_t *body_len,
-                            int *fd_buf, size_t fd_cap, size_t *n_fds) {
-    int rc = ww_codec_recv_event(d->fd, op, body_buf, WW_CODEC_MAX_BODY_BYTES,
-                                 body_len, fd_buf, fd_cap, n_fds);
-    if (rc == 0) return WAYWALLEN_OK;
-    if (rc == -ECONNRESET) return WAYWALLEN_ERR_NOTCONN;
-    return WAYWALLEN_ERR_IO;
-}
-
 /* ------------------------------------------------------------------ */
 /*  Lifecycle                                                          */
 /* ------------------------------------------------------------------ */
@@ -2247,19 +2234,29 @@ int waywallen_display_dispatch(waywallen_display_t *d) {
     if (d->fd < 0 || d->conn == WW_CONN_DEAD) return WAYWALLEN_ERR_NOTCONN;
     if (d->conn == WW_CONN_DISCONNECTED) return WAYWALLEN_ERR_STATE;
 
-    static uint8_t body_buf[WW_CODEC_MAX_BODY_BYTES];
-    uint16_t op;
-    size_t body_len;
-    int fd_buf[WW_CODEC_MAX_FDS_PER_MSG];
-    size_t n_fds;
-    int ret;
-    int rc = recv_event_frame(d, &op, body_buf, &body_len, fd_buf,
-                              WW_CODEC_MAX_FDS_PER_MSG, &n_fds);
-    if (rc != WAYWALLEN_OK) {
-        fire_disconnected(d, rc, "recv event");
-        ret = rc;
-        goto out;
+    /* Stateful non-blocking read, same path as the handshake. The
+     * fd is SOCK_NONBLOCK, so a partial frame (split header/body, or a
+     * large frame like bind_buffers split across reads) must return
+     * FRAME_NEED and resume on the next POLLIN — NOT be treated as a
+     * fatal IO error. The earlier one-shot blocking codec turned every
+     * such partial read into a spurious disconnect → respawn storm. */
+    int rc = ww_codec_recv_partial(d->fd, &d->hs_recv);
+    if (rc == WW_CODEC_FRAME_NEED)
+        return WAYWALLEN_OK;  /* 0 frames this round; level-triggered IN refires */
+    if (rc < 0) {
+        int werr = (rc == -ECONNRESET) ? WAYWALLEN_ERR_NOTCONN
+                                       : WAYWALLEN_ERR_IO;
+        fire_disconnected(d, werr, "recv event");
+        flush_dead_event(d);
+        return werr;
     }
+
+    uint16_t op = d->hs_recv.op;
+    uint8_t *body_buf = d->hs_recv.body;
+    size_t body_len = d->hs_recv.body_len;
+    int *fd_buf = d->hs_recv.fds;
+    size_t n_fds = d->hs_recv.n_fds;
+    int ret;
 
     switch (op) {
         case WW_EVT_BIND_BUFFERS:
@@ -2295,7 +2292,13 @@ int waywallen_display_dispatch(waywallen_display_t *d) {
             ret = WAYWALLEN_OK;
             break;
     }
-out:
+    /* Every switch branch consumes (imports or closes) the frame's fds,
+     * so zero n_fds before reset — otherwise recv_state_reset's
+     * close_all would double-close fds whose numbers have already been
+     * reused (e.g. by the shadow dmabuf dup), corrupting live fds.
+     * Reset must precede flush_dead_event, which may free d. */
+    d->hs_recv.n_fds = 0;
+    ww_codec_recv_state_reset(&d->hs_recv);
     flush_dead_event(d);  /* must be last; may free d */
     return ret;
 }
