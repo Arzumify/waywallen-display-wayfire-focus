@@ -1,0 +1,47 @@
+name: Release GNOME extension zip
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-gnome-zip:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ pkg-config \
+            libgtk-4-dev libglib2.0-dev \
+            gobject-introspection libgirepository1.0-dev \
+            gir1.2-gtk-4.0 \
+            libvulkan-dev libegl-dev libgles-dev
+
+      - name: Build GNOME extension zip
+        run: ./scripts/build_gnome_zip.sh
+
+      - name: Locate zip
+        id: zip
+        run: |
+          path=$(ls build/waywallen-gnome-*.zip | head -n1)
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$path")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.zip.outputs.path }}
+          archive: false
+
+      - name: Attach zip to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.zip.outputs.path }}

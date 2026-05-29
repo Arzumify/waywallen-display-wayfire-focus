@@ -1,7 +1,8 @@
 # GObject Introspection wrapper around libwaywallen_display.
 #
 # Outputs:
-#   - libwaywallen-gobject.so      (linked against waywallen_display)
+#   - libwaywallen-gobject.so      (statically links waywallen_display_static,
+#                                   so consumers ship one .so, not two)
 #   - Waywallen-1.0.gir / .typelib (consumed by GJS / Vala / pygobject)
 
 find_package(PkgConfig REQUIRED)
@@ -27,9 +28,12 @@ target_include_directories(waywallen-gobject
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
+# Link the static display lib (PIC; pulls in its backend libs PUBLICly) so
+# the wrapper .so is self-contained — no separate libwaywallen_display.so to
+# ship alongside it in the GNOME zip.
 target_link_libraries(waywallen-gobject
     PUBLIC PkgConfig::GLIB2 PkgConfig::GTK4
-    PRIVATE waywallen_display
+    PRIVATE waywallen_display_static
 )
 target_compile_options(waywallen-gobject PRIVATE -Wall -Wextra)
 

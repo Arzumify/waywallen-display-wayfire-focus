@@ -68,21 +68,17 @@ install(PROGRAMS
     COMPONENT gnome_extension
     EXCLUDE_FROM_ALL)
 
-# Self-contained bundling: ship libwaywallen_display + libwaywallen-gobject
-# + Waywallen-1.0.typelib inside the zip so the extension installs cleanly
-# under ~/.local/share/gnome-shell/extensions/ without any system-wide
-# dependency. launcher.js prepends <extension>/lib to LD_LIBRARY_PATH and
-# <extension>/lib/girepository-1.0 to GI_TYPELIB_PATH when these files
-# are present.
+# Self-contained bundling: ship libwaywallen-gobject + Waywallen-1.0.typelib
+# inside the zip so the extension installs cleanly under
+# ~/.local/share/gnome-shell/extensions/ without any system-wide dependency.
+# launcher.js prepends <extension>/lib to LD_LIBRARY_PATH and
+# <extension>/lib/girepository-1.0 to GI_TYPELIB_PATH when these are present.
+# The display lib is statically linked into libwaywallen-gobject, so only the
+# one .so ships.
 #
 # ZIP can't carry POSIX symlinks portably, so we copy the real .so file
-# under the SONAME name (e.g. libwaywallen_display.so.0). ld.so resolves
-# DT_NEEDED by SONAME, so a single file per lib is enough.
-install(FILES $<TARGET_FILE:waywallen_display>
-    DESTINATION "lib"
-    RENAME "libwaywallen_display.so.${PROJECT_VERSION_MAJOR}"
-    COMPONENT gnome_extension
-    EXCLUDE_FROM_ALL)
+# under the SONAME name (e.g. libwaywallen-gobject.so.0). ld.so resolves
+# DT_NEEDED by SONAME, so a single file is enough.
 install(FILES $<TARGET_FILE:waywallen-gobject>
     DESTINATION "lib"
     RENAME "libwaywallen-gobject.so.${PROJECT_VERSION_MAJOR}"
