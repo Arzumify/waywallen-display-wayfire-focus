@@ -63,7 +63,8 @@ export default class WaywallenExtension extends Extension {
             this._startupSignalId = Main.layoutManager.connect(
                 'startup-complete', () => this._innerEnable());
         } else {
-            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                this._idleId = 0;
                 this._innerEnable();
                 return GLib.SOURCE_REMOVE;
             });
@@ -197,6 +198,10 @@ export default class WaywallenExtension extends Extension {
         if (this._startupSignalId) {
             Main.layoutManager.disconnect(this._startupSignalId);
             this._startupSignalId = 0;
+        }
+        if (this._idleId) {
+            GLib.source_remove(this._idleId);
+            this._idleId = 0;
         }
         if (this._respawnId) {
             GLib.source_remove(this._respawnId);

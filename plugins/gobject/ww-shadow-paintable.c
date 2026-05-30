@@ -41,11 +41,9 @@ static void ww_shadow_paintable_iface_init(GdkPaintableInterface *iface);
 G_DEFINE_TYPE_WITH_CODE(WwShadowPaintable, ww_shadow_paintable, G_TYPE_OBJECT,
     G_IMPLEMENT_INTERFACE(GDK_TYPE_PAINTABLE, ww_shadow_paintable_iface_init))
 
-/* Per-texture dup'd fds. GdkDmabufTextureBuilder does NOT close the
- * fds it's handed (gdk/gdkdmabuftexturebuilder.c:1046) — the caller
- * owns them for the texture's lifetime. We pass close_dup_fds as the
- * build destroy notify so they're closed exactly when the texture
- * finalizes. Without this each frame leaks n_planes fds. */
+/* GdkDmabufTextureBuilder doesn't close the fds it's handed; we pass
+ * close_dup_fds as the build destroy notify so each frame's dups are
+ * closed when the texture finalizes (else they leak). */
 typedef struct {
     int fds[4];
     guint n;
@@ -153,11 +151,8 @@ snapshot_vfunc(GdkPaintable *paintable,
     if (width <= 0.0 || height <= 0.0)
         return;
 
-    /* Base layer: clear color over the whole surface (a solid fill is
-     * rotation-invariant, so no need to do it in pre-rotation space).
-     * Default opaque black until set_config; this is what shows before
-     * the first frame and in letterbox bars — without it the GTK window
-     * background would leak through. */
+    /* Clear-color base (default opaque black): pre-content + letterbox
+     * background, else the GTK window background leaks through. */
     if (self->clear[3] > 0.0f) {
         GdkRGBA bg = { self->clear[0], self->clear[1],
                        self->clear[2], self->clear[3] };
@@ -176,12 +171,9 @@ snapshot_vfunc(GdkPaintable *paintable,
         return;
     }
 
-    /* src is in texture pixels; dst is in widget (logical) pixels — the
-     * renderer already divided the daemon's physical dest_rect by the
-     * monitor scale before set_config, so dst is directly in the widget
-     * coordinate space. GTK's buffer scale then renders 1:1 at native
-     * resolution. dst is pre-rotation display space; for 90/270 that
-     * space has swapped W/H. */
+    /* src in texture px, dst in widget (logical) px — the renderer already
+     * divided the physical dest_rect by scale. dst is pre-rotation display
+     * space; 90/270 swap W/H. */
     int t = (int)self->transform;
     gboolean swap = (t == 1 || t == 3 || t == 5 || t == 7);
     float preW = swap ? (float)height : (float)width;
@@ -317,19 +309,10 @@ ww_shadow_paintable_refresh(WwShadowPaintable *self)
     g_return_if_fail(WW_IS_SHADOW_PAINTABLE(self));
     if (!self->have_shadow)
         return;
-    /* Rebuild GdkDmabufTexture every frame. GTK's gskvulkanimage.c only
-     * reads dma_resv into a TEMPORARY semaphore at import time, then
-     * consumes it on the first layout transition — subsequent samples
-     * of a cached VkImage do not re-sync. So the only way fresh shadow
-     * content reaches the screen is to force GSK to re-import, which
-     * requires a new GdkTexture pointer (gsk_gpu_cache_lookup_texture_image
-     * keys on it). Blitter has injected the write fence into shadow's
-     * dma_resv right before we get here, so the fresh import's
-     * EXPORT_SYNC_FILE captures it and GSK waits on first sample.
-     * g_clear_object is synchronous: when we hold the last ref, the
-     * old GdkTexture finalizes immediately, fires gsk_gpu_cache's
-     * weak_ref destroy_cb, and bumps dead_textures counter so the
-     * pre-frame GC evicts the cached VkImage. */
+    /* Rebuild every frame: GSK keys its imported-VkImage cache on the
+     * GdkTexture pointer and only syncs dma_resv at import time, so fresh
+     * content needs a new texture identity. g_clear_object is synchronous,
+     * so the old one finalizes now and GSK evicts its VkImage. */
     GdkTexture *tex = build_texture(self);
     if (!tex)
         return;

@@ -58,12 +58,8 @@ class LiveWallpaper extends St.Widget {
                 duration: FADE_IN_MS,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
-            // No redraw timer: Clutter.Clone tracks the source actor's
-            // queue-redraw, which fires when the renderer commits a new
-            // wl_buffer. So the clone repaints exactly when there's new
-            // content — a 1 fps wallpaper costs 1 repaint/s, a 60 fps one
-            // costs 60. (An earlier 16 fps poll was a workaround for the
-            // then-broken DMA-BUF sync that froze the source.)
+            // No redraw timer: Clutter.Clone repaints on the source's
+            // queue-redraw, i.e. exactly when the renderer commits a buffer.
             return;
         }
         this._schedulePoll();
@@ -97,8 +93,7 @@ class LiveWallpaper extends St.Widget {
     }
 
     _findRenderer() {
-        // bypass the override that hides our windows from the rest of
-        // the shell — we explicitly want to see them here.
+        // false bypasses the override that hides our windows elsewhere.
         const actors = global.get_window_actors(false);
         const ours = actors.filter(a =>
             a.meta_window.title?.includes(APPLICATION_ID));

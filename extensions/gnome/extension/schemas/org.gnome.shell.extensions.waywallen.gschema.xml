@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist gettext-domain="waywallen-gnome">
-  <schema id="org.waywallen.gnome" path="/org/waywallen/gnome/">
+  <schema id="org.gnome.shell.extensions.waywallen" path="/org/gnome/shell/extensions/waywallen/">
 
     <key name="instance-id" type="s">
       <default>""</default>

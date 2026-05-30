@@ -1,9 +1,6 @@
 #!/usr/bin/env -S gjs -m
-//
-// One Gtk.ApplicationWindow per Gdk.Monitor. The wallpaper DMA-BUF is
-// imported and presented through Waywallen.ShadowPaintable (the C
-// wrapper owns the GdkTexture lifetime — doing it in JS leaked because
-// GJS GC is lazy and GSK never evicted the cached VkImages).
+// One Gtk.ApplicationWindow per Gdk.Monitor; the wallpaper DMA-BUF is
+// presented through Waywallen.ShadowPaintable (C-side texture lifetime).
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
@@ -38,12 +35,8 @@ function addFdWatch(fd, condition, callback) {
     return source.attach(null);
 }
 
-// Stable per-monitor suffix for the daemon's instance-id / display-name,
-// so each physical monitor gets its own per-display settings slot. Prefer
-// the connector name (DP-1, HDMI-A-1, …); fall back to manufacturer+model,
-// then the enumeration index. Survives reorder/replug like the KDE plugin
-// (identical monitors swapped between connectors swap wallpapers — same
-// caveat as KDE).
+// Stable per-monitor key for the daemon's per-display settings: connector
+// name, else manufacturer+model, else index.
 function monitorKey(monitor, index) {
     const conn = monitor.get_connector?.();
     if (conn)
@@ -124,13 +117,9 @@ class MonitorRenderer {
         });
 
         const geom = this._monitor.get_geometry();
-        // Title hint consumed by windowManager.js: keepMinimized keeps the
-        // actor off the stage (so it doesn't cover the panel) while the
-        // wl_surface stays live for Clutter.Clone to mirror. position MUST
-        // be this monitor's origin — windowManager pins the window there via
-        // move_frame; without it every monitor's window collapses onto (0,0)
-        // (the primary), get_monitor() is no longer unique, and the
-        // extension's per-monitor matching rejects all of them.
+        // position must be this monitor's origin: windowManager pins the
+        // window there, else every monitor's window collapses onto (0,0) and
+        // get_monitor() stops being unique for per-monitor matching.
         const titleHint = JSON.stringify({
             keepMinimized: true,
             keepAtBottom: true,
@@ -139,18 +128,15 @@ class MonitorRenderer {
         });
         this._window.set_title(`@${APP_ID}!${titleHint}|${this._index}`);
 
-        // Pin the size: a minimized Wayland window gets no configure with a
-        // real allocation, so without an explicit request Gtk.Picture
-        // measures height as Infinity and gsk commits a degenerate buffer.
+        // Pin the size: a minimized Wayland window gets no configure, so
+        // without an explicit request Gtk.Picture measures height as Infinity.
         this._picture = new Gtk.Picture({
             can_shrink: true,
             content_fit: Gtk.ContentFit.FILL,
             width_request: geom.width,
             height_request: geom.height,
         });
-        // Attach the paintable up front so it fills the clear color (opaque
-        // black by default) from the first frame — otherwise the GTK window
-        // background shows during the ~seconds before the first bind.
+        // Attach up front so the clear color fills before the first bind.
         this._paintable = Waywallen.ShadowPaintable.new();
         this._picture.set_paintable(this._paintable);
 
@@ -178,8 +164,6 @@ class MonitorRenderer {
         });
         this._diagLabel.add_css_class('ww-diag');
         overlay.add_overlay(this._diagLabel);
-        // The cloned actor mirrors this overlay onto the wallpaper, so the
-        // text rides along. Update once a second (fps) + on state changes.
         this._diagTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1,
             () => { this._updateDiag(); return GLib.SOURCE_CONTINUE; });
         return overlay;
@@ -210,9 +194,8 @@ class MonitorRenderer {
 
     _onRealize() {
         try {
-            // Disable input two ways: widget-level can_target stops GTK
-            // dispatching clicks, empty wl_surface input region stops
-            // mutter's implicit pointer grab from locking the user out.
+            // can_target + empty input region: stop GTK clicks and mutter's
+            // implicit pointer grab from locking the user out.
             this._window.set_can_target(false);
             this._window.set_can_focus(false);
             if (this._picture) {
@@ -244,10 +227,8 @@ class MonitorRenderer {
         d.connect('textures-ready',
             (_o, count, w, h, fourcc, modifier, backend) =>
                 this._onTexturesReady(count, w, h, fourcc, modifier, backend));
-        // Register physical pixels (logical geometry × monitor scale), so
-        // the daemon's producer renders at the monitor's native resolution.
-        // get_geometry() is logical (1920x1080 for a 4K monitor at 200%);
-        // registering that would make the wallpaper half-resolution.
+        // Register physical pixels (logical geometry × scale) so the producer
+        // renders at native resolution, not the logical (half-res on HiDPI).
         const geom = this._monitor.get_geometry();
         const scale = this._monitor.get_scale?.() ?? this._monitor.get_scale_factor();
         this._scale = scale;
@@ -259,9 +240,8 @@ class MonitorRenderer {
         d.connect('textures-releasing', () => this._onTexturesReleasing());
         d.connect('config',
             (_o, sx, sy, sw, sh, dx, dy, dw, dh, transform, cr, cg, cb, ca) =>
-                // dest is in physical display px; divide by scale so the
-                // paintable gets widget-logical coords. source stays in
-                // texture px.
+                // dest is physical display px → divide by scale for the
+                // logical widget; source stays in texture px.
                 this._paintable?.set_config(sx, sy, sw, sh,
                                             dx / scale, dy / scale,
                                             dw / scale, dh / scale,
@@ -310,8 +290,6 @@ class MonitorRenderer {
                 return GLib.SOURCE_REMOVE;
             }
             this._setOutWatch(r === HS_NEED_WRITE);
-            // Only DONE means we reached READY this round; otherwise keep
-            // polling. Fall through to dispatch on DONE.
             if (r !== HS_DONE)
                 return GLib.SOURCE_CONTINUE;
             this._setOutWatch(false);
@@ -331,8 +309,7 @@ class MonitorRenderer {
             logIndexed(this._index, 'get_shadow_export failed');
             return;
         }
-        // set_shadow takes ownership of the fd. Paintable was created in
-        // build() so it's already painting the clear color.
+        // set_shadow takes ownership of the fd.
         this._paintable.set_shadow(sfd, nPlanes, w, h, fourcc, smod,
                                    strides, offsets);
         this._texW = w;
@@ -345,10 +322,8 @@ class MonitorRenderer {
     }
 
     _onTexturesReleasing() {
-        // Keep showing the last frame. The shadow is our own image (a
-        // copy of the producer buffer), so it survives the producer
-        // unbind; the next textures-ready swaps in fresh content. Clearing
-        // here would flash white across a re-bind / format renegotiation.
+        // Keep the last frame: the shadow survives the producer unbind, so
+        // not clearing avoids a white flash across a re-bind.
     }
 
     _onFrameReady(_idx, _seq, fd) {
@@ -362,9 +337,7 @@ class MonitorRenderer {
         return this._monitor.get_geometry();
     }
 
-    // x,y arrive in logical monitor-local pixels; the daemon registered
-    // physical pixels, so scale up by the monitor scale (else the pointer
-    // is confined to the top-left 1/scale of a HiDPI display).
+    // x,y are logical monitor-local; daemon wants physical, so scale up.
     sendPointerMotion(x, y, ts) {
         const s = this._scale || 1;
         this._display?.send_pointer_motion(x * s, y * s, ts, 0);
@@ -441,14 +414,12 @@ const app = new Gtk.Application({
 
 let renderers = [];
 
-// Events forwarded by the extension over stdin, in global compositor
-// pixel coords (the extension can't deliver them to our hidden window,
-// so it captures and pipes them here). Each line carries a point used to
-// route to the MonitorRenderer whose monitor geometry contains it.
-//   M gx gy ts                       pointer motion
-//   B gx gy code pressed ts          pointer button (pressed: 1/0)
-//   A gx gy dx dy ts                 pointer axis (wheel notches)
-//   W gx gy flags                    window-state bitmask (autopause)
+// Input forwarded by the extension over stdin (global compositor coords),
+// routed to the MonitorRenderer whose geometry contains the point:
+//   M gx gy ts                 motion
+//   B gx gy code pressed ts    button
+//   A gx gy dx dy ts           axis
+//   W gx gy flags              window-state (autopause)
 function dispatchInput(line) {
     const f = line.split(' ');
     const gx = parseFloat(f[1]);

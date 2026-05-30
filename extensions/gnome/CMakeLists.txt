@@ -7,7 +7,8 @@
 # can use it without per-user post-processing.
 
 set(WW_GNOME_UUID "org.waywallen.gnome@waywallen.io")
-set(WW_GNOME_SCHEMA_ID "org.waywallen.gnome")
+# EGO requires the org.gnome.shell.extensions.* base for both id and path.
+set(WW_GNOME_SCHEMA_ID "org.gnome.shell.extensions.waywallen")
 
 # GNOME extension `version`: a monotonic integer the Shell / EGO compare on
 # (semver doesn't fit here). Bump by 1 every released extension change,
@@ -44,9 +45,7 @@ install(FILES extension/schemas/${WW_GNOME_SCHEMA_ID}.gschema.xml
     COMPONENT gnome_extension
     EXCLUDE_FROM_ALL)
 
-# Pre-compile the schema so the zip is self-contained — getSettings() opens
-# gschemas.compiled, not the XML, and gnome-shell does not auto-recompile
-# per-extension schemas at load time.
+# Pre-compile the schema — a directly-unzipped install needs gschemas.compiled.
 find_program(GLIB_COMPILE_SCHEMAS glib-compile-schemas REQUIRED)
 set(_ww_schema_stage "${CMAKE_CURRENT_BINARY_DIR}/schemas-stage")
 set(_ww_compiled_schema "${_ww_schema_stage}/gschemas.compiled")

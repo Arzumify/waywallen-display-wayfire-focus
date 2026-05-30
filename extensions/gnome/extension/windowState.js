@@ -125,8 +125,9 @@ export class WindowStateMonitor {
     }
 
     _isMaximized(w) {
+        // is_maximized() is 49+; older versions use the maximized-* properties.
         if (typeof w.is_maximized === 'function')
             return w.is_maximized();
-        return w.get_maximized?.() === Meta.MaximizeFlags.BOTH;
+        return w.maximized_horizontally && w.maximized_vertically;
     }
 }

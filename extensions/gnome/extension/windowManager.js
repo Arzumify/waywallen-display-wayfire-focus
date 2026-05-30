@@ -1,12 +1,7 @@
-// Force the renderer subprocess's MetaWindow to behave as a hidden
-// "shadow" client: keep minimized + keep at the bottom of the stack +
-// keep position. mutter then never paints it on top, but its
-// wl_surface keeps committing — Clutter.Clone on the background actor
-// (see wallpaper.js) renders the live content.
-//
-// Behavior is driven by the JSON state embedded in the window title:
+// Keeps the renderer's MetaWindow minimized / at-bottom / positioned so it
+// never paints on top while its wl_surface keeps committing for the
+// Clutter.Clone. Driven by JSON state in the window title:
 //   @<APP_ID>!<json>|<monitor_index>
-// The renderer can change flags at runtime by re-setting the title.
 
 import GLib from 'gi://GLib';
 
@@ -19,6 +14,7 @@ class ManagedWindow {
     constructor(window) {
         this._window = window;
         this._signals = [];
+        this._lowerIdleId = 0;
         this._states = {
             keepAtBottom: false,
             keepMinimized: false,
@@ -81,12 +77,12 @@ class ManagedWindow {
             this._window.unmake_above();
         if (this._states.keepMinimized && !this._window.minimized) {
             this._window.minimize();
-        } else if (this._states.keepAtBottom && !this._window.minimized) {
-            // Defer to idle: if mutter hasn't assigned a stack position
-            // yet, lower() triggers meta_window_set_stack_position_no_sync
-            // CRITICAL. By the next main-loop iteration the position has
-            // usually been assigned.
-            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+        } else if (this._states.keepAtBottom && !this._window.minimized &&
+                   !this._lowerIdleId) {
+            // Defer to idle: lower() before mutter assigns a stack position
+            // trips a set_stack_position_no_sync CRITICAL.
+            this._lowerIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                this._lowerIdleId = 0;
                 try { this._window?.lower(); } catch (_e) {}
                 return GLib.SOURCE_REMOVE;
             });
@@ -98,6 +94,10 @@ class ManagedWindow {
     }
 
     disconnect() {
+        if (this._lowerIdleId) {
+            GLib.source_remove(this._lowerIdleId);
+            this._lowerIdleId = 0;
+        }
         if (!this._window)
             return;
         for (const id of this._signals) {
