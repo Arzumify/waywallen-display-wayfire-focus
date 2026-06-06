@@ -1,5 +1,5 @@
 [package]
-name = "waywallen-display-sys"
+name = "waywallen-display"
 version = "0.2.4"
 edition = "2021"
 license = "MIT"

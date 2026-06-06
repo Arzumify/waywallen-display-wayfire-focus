@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::OutputBinding;
-use waywallen_display_sys::{
+use waywallen_display::{
     WAYWALLEN_WIN_HAS_ACTIVE, WAYWALLEN_WIN_HAS_FULLSCREEN, WAYWALLEN_WIN_HAS_MAXIMIZED,
     WAYWALLEN_WIN_HAS_NON_MINIMIZED,
 };
@@ -84,7 +84,7 @@ fn push_state(registry: &BindingRegistry) {
             continue;
         }
         let rc = binding.with_display(|d| unsafe {
-            waywallen_display_sys::waywallen_display_set_window_state(d, flags)
+            waywallen_display::waywallen_display_set_window_state(d, flags)
         });
         if let Some(rc) = rc {
             if rc >= 0 {
