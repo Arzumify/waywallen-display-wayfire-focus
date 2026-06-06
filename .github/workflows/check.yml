@@ -15,8 +15,8 @@ jobs:
 
       - name: Install format dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-format
+          python3 -m pip install --user clang-format==22.1.5
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           rustup component add rustfmt
 
       - name: Check formatting
