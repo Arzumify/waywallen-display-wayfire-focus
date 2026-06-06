@@ -12,7 +12,7 @@ build = "build.rs"
 path = "src/lib.rs"
 
 [features]
-default = ["egl", "vulkan"]
+default = ["egl", "vulkan", "layer-shell"]
 egl = []
 vulkan = []
 layer-shell = [
