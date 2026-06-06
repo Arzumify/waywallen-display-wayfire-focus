@@ -23,30 +23,26 @@
 extern "C" {
 #endif
 
-#define WW_DRM_FORMAT_ABGR8888    0x34324241u  /* AB24 */
-#define WW_DRM_FORMAT_XBGR8888    0x34324258u  /* XB24 */
-#define WW_DRM_FORMAT_ARGB8888    0x34325241u  /* AR24 */
-#define WW_DRM_FORMAT_XRGB8888    0x34325258u  /* XR24 */
-#define WW_DRM_FORMAT_RGBA8888    0x41424752u  /* RGBA */
-#define WW_DRM_FORMAT_BGRA8888    0x41524742u  /* BGRA */
-#define WW_DRM_FORMAT_RGBX8888    0x58424752u  /* RGBX */
-#define WW_DRM_FORMAT_BGRX8888    0x58524742u  /* BGRX */
+#define WW_DRM_FORMAT_ABGR8888 0x34324241u /* AB24 */
+#define WW_DRM_FORMAT_XBGR8888 0x34324258u /* XB24 */
+#define WW_DRM_FORMAT_ARGB8888 0x34325241u /* AR24 */
+#define WW_DRM_FORMAT_XRGB8888 0x34325258u /* XR24 */
+#define WW_DRM_FORMAT_RGBA8888 0x41424752u /* RGBA */
+#define WW_DRM_FORMAT_BGRA8888 0x41524742u /* BGRA */
+#define WW_DRM_FORMAT_RGBX8888 0x58424752u /* RGBX */
+#define WW_DRM_FORMAT_BGRX8888 0x58524742u /* BGRX */
 
-#define WW_DRM_FORMAT_MOD_LINEAR  0ULL
+#define WW_DRM_FORMAT_MOD_LINEAR 0ULL
 
 /* The 8 fourccs we care about, in the same order as the bridge.
  * Useful for backend probes that want to iterate the whitelist. */
 static const uint32_t WW_DRM_FORMAT_RGBA_8888[8] = {
-    WW_DRM_FORMAT_ABGR8888, WW_DRM_FORMAT_XBGR8888,
-    WW_DRM_FORMAT_ARGB8888, WW_DRM_FORMAT_XRGB8888,
-    WW_DRM_FORMAT_RGBA8888, WW_DRM_FORMAT_BGRA8888,
-    WW_DRM_FORMAT_RGBX8888, WW_DRM_FORMAT_BGRX8888,
+    WW_DRM_FORMAT_ABGR8888, WW_DRM_FORMAT_XBGR8888, WW_DRM_FORMAT_ARGB8888, WW_DRM_FORMAT_XRGB8888,
+    WW_DRM_FORMAT_RGBA8888, WW_DRM_FORMAT_BGRA8888, WW_DRM_FORMAT_RGBX8888, WW_DRM_FORMAT_BGRX8888,
 };
 
 static inline bool ww_drm_fourcc_supported(uint32_t fourcc) {
-    for (size_t i = 0;
-         i < sizeof(WW_DRM_FORMAT_RGBA_8888)
-             / sizeof(WW_DRM_FORMAT_RGBA_8888[0]);
+    for (size_t i = 0; i < sizeof(WW_DRM_FORMAT_RGBA_8888) / sizeof(WW_DRM_FORMAT_RGBA_8888[0]);
          ++i) {
         if (fourcc == WW_DRM_FORMAT_RGBA_8888[i]) return true;
     }

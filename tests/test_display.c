@@ -10,8 +10,10 @@
  *
  * Coverage:
  *   1. test_connect_to_nonexistent_socket    — begin_connect doesn't block on a missing peer
- *   2. test_legacy_blocking_connect          — old `waywallen_display_connect` still works (poll wrapper)
- *   3. test_begin_connect_immediate          — begin_connect transitions to HELLO_PENDING on sync accept
+ *   2. test_legacy_blocking_connect          — old `waywallen_display_connect` still works (poll
+ * wrapper)
+ *   3. test_begin_connect_immediate          — begin_connect transitions to HELLO_PENDING on sync
+ * accept
  *   4. test_full_handshake_via_async_api     — full begin → advance × N → DONE round-trip
  *   5. test_partial_welcome                  — welcome split across multiple kernel writes
  *   6. test_server_closes_during_welcome_wait — peer EOF mid-handshake → on_disconnected fires
@@ -50,7 +52,7 @@ static void sleep_ms(int ms) {
 
 struct test_state {
     char sock_path[128];
-    int listen_fd;
+    int  listen_fd;
 
     int on_disconnected_count;
     int on_textures_ready_count;
@@ -68,47 +70,49 @@ struct test_state {
     uint32_t consumer_caps_color_caps;
 };
 
-static void cb_textures_ready(void *ud, const waywallen_textures_t *t) {
+static void cb_textures_ready(void* ud, const waywallen_textures_t* t) {
     (void)t;
-    ((struct test_state *)ud)->on_textures_ready_count++;
+    ((struct test_state*)ud)->on_textures_ready_count++;
 }
-static void cb_textures_releasing(void *ud, const waywallen_textures_t *t) {
-    (void)ud; (void)t;
+static void cb_textures_releasing(void* ud, const waywallen_textures_t* t) {
+    (void)ud;
+    (void)t;
 }
-static void cb_config(void *ud, const waywallen_config_t *c) {
+static void cb_config(void* ud, const waywallen_config_t* c) {
     (void)c;
-    ((struct test_state *)ud)->on_config_count++;
+    ((struct test_state*)ud)->on_config_count++;
 }
-static void cb_frame_ready(void *ud, const waywallen_frame_t *f) {
+static void cb_frame_ready(void* ud, const waywallen_frame_t* f) {
     (void)f;
-    ((struct test_state *)ud)->on_frame_ready_count++;
+    ((struct test_state*)ud)->on_frame_ready_count++;
 }
-static void cb_disconnected(void *ud, int code, const char *msg) {
-    struct test_state *ts = (struct test_state *)ud;
+static void cb_disconnected(void* ud, int code, const char* msg) {
+    struct test_state* ts = (struct test_state*)ud;
     ts->on_disconnected_count++;
     ts->last_disconnect_code = code;
     if (msg) {
-        snprintf(ts->last_disconnect_msg, sizeof(ts->last_disconnect_msg),
-                 "%s", msg);
+        snprintf(ts->last_disconnect_msg, sizeof(ts->last_disconnect_msg), "%s", msg);
     } else {
         ts->last_disconnect_msg[0] = '\0';
     }
 }
 
 static const waywallen_display_callbacks_t kCallbacks = {
-    .on_textures_ready = cb_textures_ready,
+    .on_textures_ready     = cb_textures_ready,
     .on_textures_releasing = cb_textures_releasing,
-    .on_config = cb_config,
-    .on_frame_ready = cb_frame_ready,
-    .on_disconnected = cb_disconnected,
-    .user_data = NULL,
+    .on_config             = cb_config,
+    .on_frame_ready        = cb_frame_ready,
+    .on_disconnected       = cb_disconnected,
+    .user_data             = NULL,
 };
 
-static void ts_init(struct test_state *ts) {
+static void ts_init(struct test_state* ts) {
     memset(ts, 0, sizeof(*ts));
-    snprintf(ts->sock_path, sizeof(ts->sock_path),
+    snprintf(ts->sock_path,
+             sizeof(ts->sock_path),
              "/tmp/waywallen-test-display-%d-%p.sock",
-             (int)getpid(), (void *)ts);
+             (int)getpid(),
+             (void*)ts);
     unlink(ts->sock_path);
 
     ts->listen_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -116,14 +120,14 @@ static void ts_init(struct test_state *ts) {
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    size_t pl = strlen(ts->sock_path);
+    size_t pl       = strlen(ts->sock_path);
     assert(pl < sizeof(addr.sun_path));
     memcpy(addr.sun_path, ts->sock_path, pl);
-    assert(bind(ts->listen_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+    assert(bind(ts->listen_fd, (struct sockaddr*)&addr, sizeof(addr)) == 0);
     assert(listen(ts->listen_fd, 1) == 0);
 }
 
-static void ts_teardown(struct test_state *ts) {
+static void ts_teardown(struct test_state* ts) {
     if (ts->listen_fd >= 0) {
         close(ts->listen_fd);
         ts->listen_fd = -1;
@@ -131,19 +135,18 @@ static void ts_teardown(struct test_state *ts) {
     unlink(ts->sock_path);
 }
 
-typedef int (*server_handler_t)(int client_fd, struct test_state *ts);
+typedef int (*server_handler_t)(int client_fd, struct test_state* ts);
 
 struct server_thread_arg {
-    struct test_state *ts;
-    server_handler_t handler;
+    struct test_state* ts;
+    server_handler_t   handler;
 };
 
-static void *server_thread_fn(void *arg) {
-    struct server_thread_arg *sta = (struct server_thread_arg *)arg;
-    struct sockaddr_un peer;
-    socklen_t peer_len = sizeof(peer);
-    int client_fd = accept(sta->ts->listen_fd,
-                           (struct sockaddr *)&peer, &peer_len);
+static void* server_thread_fn(void* arg) {
+    struct server_thread_arg* sta = (struct server_thread_arg*)arg;
+    struct sockaddr_un        peer;
+    socklen_t                 peer_len = sizeof(peer);
+    int client_fd = accept(sta->ts->listen_fd, (struct sockaddr*)&peer, &peer_len);
     if (client_fd < 0) {
         fprintf(stderr, "[server] accept: %s\n", strerror(errno));
         free(sta);
@@ -155,20 +158,19 @@ static void *server_thread_fn(void *arg) {
     return NULL;
 }
 
-static pthread_t spawn_server(struct test_state *ts, server_handler_t handler) {
-    struct server_thread_arg *sta =
-        (struct server_thread_arg *)calloc(1, sizeof(*sta));
-    sta->ts = ts;
-    sta->handler = handler;
+static pthread_t spawn_server(struct test_state* ts, server_handler_t handler) {
+    struct server_thread_arg* sta = (struct server_thread_arg*)calloc(1, sizeof(*sta));
+    sta->ts                       = ts;
+    sta->handler                  = handler;
     pthread_t tid;
     assert(pthread_create(&tid, NULL, server_thread_fn, sta) == 0);
     return tid;
 }
 
-static waywallen_display_t *make_client(struct test_state *ts) {
+static waywallen_display_t* make_client(struct test_state* ts) {
     waywallen_display_callbacks_t cb = kCallbacks;
-    cb.user_data = ts;
-    waywallen_display_t *d = waywallen_display_new(&cb);
+    cb.user_data                     = ts;
+    waywallen_display_t* d           = waywallen_display_new(&cb);
     assert(d != NULL);
     return d;
 }
@@ -176,18 +178,21 @@ static waywallen_display_t *make_client(struct test_state *ts) {
 /* Drive begin_connect → advance_handshake to completion via a private
  * poll loop. Returns WAYWALLEN_OK on DONE, or the error code from the
  * state machine. Times out at `timeout_ms`. */
-static int drive_handshake(waywallen_display_t *d, int timeout_ms) {
+static int drive_handshake(waywallen_display_t* d, int timeout_ms) {
     int fd = waywallen_display_get_fd(d);
     for (;;) {
         int rc = waywallen_display_advance_handshake(d);
         if (rc == WAYWALLEN_HS_DONE) return WAYWALLEN_OK;
         if (rc < 0) return rc;
         struct pollfd pfd;
-        pfd.fd = fd;
+        pfd.fd      = fd;
         pfd.revents = 0;
-        if (rc == WAYWALLEN_HS_NEED_READ)       pfd.events = POLLIN;
-        else if (rc == WAYWALLEN_HS_NEED_WRITE) pfd.events = POLLOUT;
-        else                                    pfd.events = POLLIN | POLLOUT;
+        if (rc == WAYWALLEN_HS_NEED_READ)
+            pfd.events = POLLIN;
+        else if (rc == WAYWALLEN_HS_NEED_WRITE)
+            pfd.events = POLLOUT;
+        else
+            pfd.events = POLLIN | POLLOUT;
         int n = poll(&pfd, 1, timeout_ms);
         if (n == 0) return -ETIMEDOUT;
         if (n < 0) {
@@ -202,17 +207,16 @@ static int drive_handshake(waywallen_display_t *d, int timeout_ms) {
 /* ------------------------------------------------------------------ */
 
 /* Full happy-path handshake responder; mirrors what the daemon does. */
-static int handler_full_handshake(int client_fd, struct test_state *ts) {
+static int handler_full_handshake(int client_fd, struct test_state* ts) {
     (void)ts;
     static uint8_t body_buf[WW_CODEC_MAX_BODY_BYTES];
-    uint16_t op;
-    size_t body_len;
-    int fds[4];
-    size_t n_fds;
+    uint16_t       op;
+    size_t         body_len;
+    int            fds[4];
+    size_t         n_fds;
 
-    int rc = ww_codec_recv_request(client_fd, &op, body_buf,
-                                   WW_CODEC_MAX_BODY_BYTES, &body_len,
-                                   fds, 4, &n_fds);
+    int rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     if (rc != 0 || op != WW_REQ_HELLO) return -1;
     ww_req_hello_t hello;
     if (ww_req_hello_decode(body_buf, body_len, &hello) != WW_OK) return -1;
@@ -221,25 +225,23 @@ static int handler_full_handshake(int client_fd, struct test_state *ts) {
     /* Send WELCOME. */
     ww_evt_welcome_t welcome;
     memset(&welcome, 0, sizeof(welcome));
-    welcome.server_version = (char *)"mock-server/0.1";
-    char *features_data[1] = { (char *)"explicit_sync_fd" };
+    welcome.server_version = (char*)"mock-server/0.1";
+    char* features_data[1] = { (char*)"explicit_sync_fd" };
     welcome.features.count = 1;
-    welcome.features.data = features_data;
+    welcome.features.data  = features_data;
     ww_buf_t out;
     ww_buf_init(&out);
     if (ww_evt_welcome_encode(&welcome, &out) != WW_OK) {
         ww_buf_free(&out);
         return -1;
     }
-    rc = ww_codec_send_event(client_fd, WW_EVT_WELCOME,
-                             out.data, out.len, NULL, 0);
+    rc = ww_codec_send_event(client_fd, WW_EVT_WELCOME, out.data, out.len, NULL, 0);
     ww_buf_free(&out);
     if (rc != 0) return -1;
 
     /* Expect REGISTER_DISPLAY. */
-    rc = ww_codec_recv_request(client_fd, &op, body_buf,
-                               WW_CODEC_MAX_BODY_BYTES, &body_len,
-                               fds, 4, &n_fds);
+    rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     if (rc != 0 || op != WW_REQ_REGISTER_DISPLAY) return -1;
     ww_req_register_display_t reg;
     if (ww_req_register_display_decode(body_buf, body_len, &reg) != WW_OK) return -1;
@@ -252,15 +254,13 @@ static int handler_full_handshake(int client_fd, struct test_state *ts) {
         ww_buf_free(&out);
         return -1;
     }
-    rc = ww_codec_send_event(client_fd, WW_EVT_DISPLAY_ACCEPTED,
-                             out.data, out.len, NULL, 0);
+    rc = ww_codec_send_event(client_fd, WW_EVT_DISPLAY_ACCEPTED, out.data, out.len, NULL, 0);
     ww_buf_free(&out);
     if (rc != 0) return -1;
 
     /* Drain the BYE or peer close. */
-    rc = ww_codec_recv_request(client_fd, &op, body_buf,
-                               WW_CODEC_MAX_BODY_BYTES, &body_len,
-                               fds, 4, &n_fds);
+    rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     (void)rc;
     return 0;
 }
@@ -269,18 +269,16 @@ static int handler_full_handshake(int client_fd, struct test_state *ts) {
  * consumer_caps request the client emits after display_accepted, and
  * records mem_hints / sync_caps / color_caps onto the test_state for
  * the main thread to assert. */
-static int handler_full_handshake_capture_caps(int client_fd,
-                                               struct test_state *ts) {
+static int handler_full_handshake_capture_caps(int client_fd, struct test_state* ts) {
     static uint8_t body_buf[WW_CODEC_MAX_BODY_BYTES];
-    uint16_t op;
-    size_t body_len;
-    int fds[4];
-    size_t n_fds;
+    uint16_t       op;
+    size_t         body_len;
+    int            fds[4];
+    size_t         n_fds;
 
     /* HELLO -> WELCOME */
-    int rc = ww_codec_recv_request(client_fd, &op, body_buf,
-                                   WW_CODEC_MAX_BODY_BYTES, &body_len,
-                                   fds, 4, &n_fds);
+    int rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     if (rc != 0 || op != WW_REQ_HELLO) return -1;
     ww_req_hello_t hello;
     if (ww_req_hello_decode(body_buf, body_len, &hello) != WW_OK) return -1;
@@ -288,25 +286,23 @@ static int handler_full_handshake_capture_caps(int client_fd,
 
     ww_evt_welcome_t welcome;
     memset(&welcome, 0, sizeof(welcome));
-    welcome.server_version = (char *)"mock-server/0.1";
-    char *features_data[1] = { (char *)"explicit_sync_fd" };
+    welcome.server_version = (char*)"mock-server/0.1";
+    char* features_data[1] = { (char*)"explicit_sync_fd" };
     welcome.features.count = 1;
-    welcome.features.data = features_data;
+    welcome.features.data  = features_data;
     ww_buf_t out;
     ww_buf_init(&out);
     if (ww_evt_welcome_encode(&welcome, &out) != WW_OK) {
         ww_buf_free(&out);
         return -1;
     }
-    rc = ww_codec_send_event(client_fd, WW_EVT_WELCOME,
-                             out.data, out.len, NULL, 0);
+    rc = ww_codec_send_event(client_fd, WW_EVT_WELCOME, out.data, out.len, NULL, 0);
     ww_buf_free(&out);
     if (rc != 0) return -1;
 
     /* REGISTER_DISPLAY -> DISPLAY_ACCEPTED */
-    rc = ww_codec_recv_request(client_fd, &op, body_buf,
-                               WW_CODEC_MAX_BODY_BYTES, &body_len,
-                               fds, 4, &n_fds);
+    rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     if (rc != 0 || op != WW_REQ_REGISTER_DISPLAY) return -1;
     ww_req_register_display_t reg;
     if (ww_req_register_display_decode(body_buf, body_len, &reg) != WW_OK) return -1;
@@ -318,25 +314,23 @@ static int handler_full_handshake_capture_caps(int client_fd,
         ww_buf_free(&out);
         return -1;
     }
-    rc = ww_codec_send_event(client_fd, WW_EVT_DISPLAY_ACCEPTED,
-                             out.data, out.len, NULL, 0);
+    rc = ww_codec_send_event(client_fd, WW_EVT_DISPLAY_ACCEPTED, out.data, out.len, NULL, 0);
     ww_buf_free(&out);
     if (rc != 0) return -1;
 
     /* CONSUMER_CAPS -- the next request the client sends after
      * display_accepted. Capture mem_hints / sync_caps / color_caps. */
-    rc = ww_codec_recv_request(client_fd, &op, body_buf,
-                               WW_CODEC_MAX_BODY_BYTES, &body_len,
-                               fds, 4, &n_fds);
+    rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     if (rc != 0 || op != WW_REQ_CONSUMER_CAPS) return -1;
     ww_req_consumer_caps_t caps;
     if (ww_req_consumer_caps_decode(body_buf, body_len, &caps) != WW_OK) {
         return -1;
     }
-    ts->consumer_caps_mem_hints = caps.mem_hints;
-    ts->consumer_caps_sync_caps = caps.sync_caps;
+    ts->consumer_caps_mem_hints  = caps.mem_hints;
+    ts->consumer_caps_sync_caps  = caps.sync_caps;
     ts->consumer_caps_color_caps = caps.color_caps;
-    ts->saw_consumer_caps = 1;
+    ts->saw_consumer_caps        = 1;
     ww_req_consumer_caps_free(&caps);
     return 0;
 }
@@ -344,26 +338,25 @@ static int handler_full_handshake_capture_caps(int client_fd,
 /* Recv hello then send welcome in two writes (header bytes 0..1, then
  * 2..3+body) with a small pause. Forces the client's recv state machine
  * to handle a partial header. */
-static int handler_partial_welcome(int client_fd, struct test_state *ts) {
+static int handler_partial_welcome(int client_fd, struct test_state* ts) {
     (void)ts;
     static uint8_t body_buf[WW_CODEC_MAX_BODY_BYTES];
-    uint16_t op;
-    size_t body_len;
-    int fds[4];
-    size_t n_fds;
+    uint16_t       op;
+    size_t         body_len;
+    int            fds[4];
+    size_t         n_fds;
 
-    int rc = ww_codec_recv_request(client_fd, &op, body_buf,
-                                   WW_CODEC_MAX_BODY_BYTES, &body_len,
-                                   fds, 4, &n_fds);
+    int rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     if (rc != 0 || op != WW_REQ_HELLO) return -1;
 
     /* Encode welcome body. */
     ww_evt_welcome_t welcome;
     memset(&welcome, 0, sizeof(welcome));
-    welcome.server_version = (char *)"mock-server/0.1";
-    char *features_data[1] = { (char *)"explicit_sync_fd" };
+    welcome.server_version = (char*)"mock-server/0.1";
+    char* features_data[1] = { (char*)"explicit_sync_fd" };
     welcome.features.count = 1;
-    welcome.features.data = features_data;
+    welcome.features.data  = features_data;
     ww_buf_t body;
     ww_buf_init(&body);
     if (ww_evt_welcome_encode(&welcome, &body) != WW_OK) {
@@ -374,7 +367,7 @@ static int handler_partial_welcome(int client_fd, struct test_state *ts) {
     /* Manual framing — split header across two writes with a sleep
      * between them so the kernel surfaces an EAGAIN to the client's
      * non-blocking recv between bytes 2 and 3. */
-    size_t total = 4 + body.len;
+    size_t  total = 4 + body.len;
     uint8_t hdr[4];
     hdr[0] = (uint8_t)(WW_EVT_WELCOME & 0xff);
     hdr[1] = (uint8_t)((WW_EVT_WELCOME >> 8) & 0xff);
@@ -382,75 +375,79 @@ static int handler_partial_welcome(int client_fd, struct test_state *ts) {
     hdr[3] = (uint8_t)((total >> 8) & 0xff);
 
     ssize_t w = write(client_fd, hdr, 2);
-    if (w != 2) { ww_buf_free(&body); return -1; }
+    if (w != 2) {
+        ww_buf_free(&body);
+        return -1;
+    }
     sleep_ms(20);
     w = write(client_fd, hdr + 2, 2);
-    if (w != 2) { ww_buf_free(&body); return -1; }
+    if (w != 2) {
+        ww_buf_free(&body);
+        return -1;
+    }
     sleep_ms(20);
     if (body.len > 0) {
         w = write(client_fd, body.data, body.len);
-        if ((size_t)w != body.len) { ww_buf_free(&body); return -1; }
+        if ((size_t)w != body.len) {
+            ww_buf_free(&body);
+            return -1;
+        }
     }
     ww_buf_free(&body);
 
     /* Continue handshake normally. */
-    rc = ww_codec_recv_request(client_fd, &op, body_buf,
-                               WW_CODEC_MAX_BODY_BYTES, &body_len,
-                               fds, 4, &n_fds);
+    rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     if (rc != 0 || op != WW_REQ_REGISTER_DISPLAY) return -1;
     ww_evt_display_accepted_t accepted = { .display_id = 7 };
-    ww_buf_t out;
+    ww_buf_t                  out;
     ww_buf_init(&out);
     if (ww_evt_display_accepted_encode(&accepted, &out) != WW_OK) {
         ww_buf_free(&out);
         return -1;
     }
-    rc = ww_codec_send_event(client_fd, WW_EVT_DISPLAY_ACCEPTED,
-                             out.data, out.len, NULL, 0);
+    rc = ww_codec_send_event(client_fd, WW_EVT_DISPLAY_ACCEPTED, out.data, out.len, NULL, 0);
     ww_buf_free(&out);
     return rc;
 }
 
 /* Recv hello then close immediately. The client should observe ECONNRESET
  * during the welcome wait and surface on_disconnected. */
-static int handler_close_after_hello(int client_fd, struct test_state *ts) {
+static int handler_close_after_hello(int client_fd, struct test_state* ts) {
     (void)ts;
     static uint8_t body_buf[WW_CODEC_MAX_BODY_BYTES];
-    uint16_t op;
-    size_t body_len;
-    int fds[4];
-    size_t n_fds;
-    int rc = ww_codec_recv_request(client_fd, &op, body_buf,
-                                   WW_CODEC_MAX_BODY_BYTES, &body_len,
-                                   fds, 4, &n_fds);
+    uint16_t       op;
+    size_t         body_len;
+    int            fds[4];
+    size_t         n_fds;
+    int            rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     (void)rc;
-    return 0;  /* return -> close(client_fd) in the thread shim */
+    return 0; /* return -> close(client_fd) in the thread shim */
 }
 
 /* Recv hello then send WW_EVT_ERROR (XML op=7) instead of welcome. */
-static int handler_send_error_after_hello(int client_fd, struct test_state *ts) {
+static int handler_send_error_after_hello(int client_fd, struct test_state* ts) {
     (void)ts;
     static uint8_t body_buf[WW_CODEC_MAX_BODY_BYTES];
-    uint16_t op;
-    size_t body_len;
-    int fds[4];
-    size_t n_fds;
-    int rc = ww_codec_recv_request(client_fd, &op, body_buf,
-                                   WW_CODEC_MAX_BODY_BYTES, &body_len,
-                                   fds, 4, &n_fds);
+    uint16_t       op;
+    size_t         body_len;
+    int            fds[4];
+    size_t         n_fds;
+    int            rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     if (rc != 0 || op != WW_REQ_HELLO) return -1;
 
     ww_evt_error_t er;
-    er.code = 42;
-    er.message = (char *)"nope";
+    er.code    = 42;
+    er.message = (char*)"nope";
     ww_buf_t out;
     ww_buf_init(&out);
     if (ww_evt_error_encode(&er, &out) != WW_OK) {
         ww_buf_free(&out);
         return -1;
     }
-    rc = ww_codec_send_event(client_fd, WW_EVT_ERROR,
-                             out.data, out.len, NULL, 0);
+    rc = ww_codec_send_event(client_fd, WW_EVT_ERROR, out.data, out.len, NULL, 0);
     ww_buf_free(&out);
     return rc;
 }
@@ -464,14 +461,13 @@ static void test_connect_to_nonexistent_socket(void) {
      * error and never block. */
     struct test_state ts;
     memset(&ts, 0, sizeof(ts));
-    snprintf(ts.sock_path, sizeof(ts.sock_path),
-             "/tmp/waywallen-nonexistent-%d.sock", (int)getpid());
+    snprintf(
+        ts.sock_path, sizeof(ts.sock_path), "/tmp/waywallen-nonexistent-%d.sock", (int)getpid());
     unlink(ts.sock_path);
 
-    waywallen_display_t *d = make_client(&ts);
-    int rc = waywallen_display_begin_connect(d, ts.sock_path,
-                                             "test-display",
-                                             NULL, 1920, 1080, 60000);
+    waywallen_display_t* d = make_client(&ts);
+    int                  rc =
+        waywallen_display_begin_connect(d, ts.sock_path, "test-display", NULL, 1920, 1080, 60000);
     assert(rc != WAYWALLEN_OK);
     waywallen_display_free(d);
     printf("  ok test_connect_to_nonexistent_socket (rc=%d)\n", rc);
@@ -482,9 +478,8 @@ static void test_legacy_blocking_connect(void) {
     ts_init(&ts);
     pthread_t srv = spawn_server(&ts, handler_full_handshake);
 
-    waywallen_display_t *d = make_client(&ts);
-    int rc = waywallen_display_connect(d, ts.sock_path, "test-display",
-                                       NULL, 1920, 1080, 60000);
+    waywallen_display_t* d = make_client(&ts);
+    int rc = waywallen_display_connect(d, ts.sock_path, "test-display", NULL, 1920, 1080, 60000);
     assert(rc == WAYWALLEN_OK);
     assert(ts.on_disconnected_count == 0);
     waywallen_display_close(d);
@@ -500,9 +495,9 @@ static void test_begin_connect_immediate(void) {
     ts_init(&ts);
     pthread_t srv = spawn_server(&ts, handler_full_handshake);
 
-    waywallen_display_t *d = make_client(&ts);
-    int rc = waywallen_display_begin_connect(d, ts.sock_path, "test-display",
-                                             NULL, 640, 480, 60000);
+    waywallen_display_t* d = make_client(&ts);
+    int                  rc =
+        waywallen_display_begin_connect(d, ts.sock_path, "test-display", NULL, 640, 480, 60000);
     assert(rc == WAYWALLEN_OK);
     assert(waywallen_display_get_fd(d) >= 0);
     /* On a sync accept the kernel completes connect immediately, so the
@@ -528,9 +523,9 @@ static void test_full_handshake_via_async_api(void) {
     ts_init(&ts);
     pthread_t srv = spawn_server(&ts, handler_full_handshake);
 
-    waywallen_display_t *d = make_client(&ts);
-    int rc = waywallen_display_begin_connect(d, ts.sock_path, "test-display",
-                                             NULL, 1920, 1080, 60000);
+    waywallen_display_t* d = make_client(&ts);
+    int                  rc =
+        waywallen_display_begin_connect(d, ts.sock_path, "test-display", NULL, 1920, 1080, 60000);
     assert(rc == WAYWALLEN_OK);
     rc = drive_handshake(d, 2000);
     assert(rc == WAYWALLEN_OK);
@@ -556,9 +551,9 @@ static void test_consumer_caps_signals_linear_only_when_no_backend(void) {
     ts_init(&ts);
     pthread_t srv = spawn_server(&ts, handler_full_handshake_capture_caps);
 
-    waywallen_display_t *d = make_client(&ts);
-    int rc = waywallen_display_begin_connect(d, ts.sock_path, "test-display",
-                                             NULL, 1920, 1080, 60000);
+    waywallen_display_t* d = make_client(&ts);
+    int                  rc =
+        waywallen_display_begin_connect(d, ts.sock_path, "test-display", NULL, 1920, 1080, 60000);
     assert(rc == WAYWALLEN_OK);
     rc = drive_handshake(d, 2000);
     assert(rc == WAYWALLEN_OK);
@@ -573,23 +568,23 @@ static void test_consumer_caps_signals_linear_only_when_no_backend(void) {
     const uint32_t WW_SYNC_SYNCOBJ_BINARY   = 1u << 1;
     const uint32_t WW_SYNC_SYNCOBJ_TIMELINE = 1u << 2;
 
-    assert((ts.consumer_caps_mem_hints & WW_MEM_HINT_HOST_VISIBLE) != 0
-           && "expected HOST_VISIBLE in mem_hints");
-    assert((ts.consumer_caps_mem_hints & WW_MEM_HINT_LINEAR_ONLY) != 0
-           && "expected LINEAR_ONLY in mem_hints (no backend → fallback)");
-    assert((ts.consumer_caps_mem_hints & WW_MEM_HINT_DEVICE_LOCAL) == 0
-           && "DEVICE_LOCAL must not be advertised without Vulkan probe");
-    assert((ts.consumer_caps_sync_caps
-            & (WW_SYNC_SYNCOBJ_BINARY | WW_SYNC_SYNCOBJ_TIMELINE))
-           == (WW_SYNC_SYNCOBJ_BINARY | WW_SYNC_SYNCOBJ_TIMELINE)
-           && "sync_caps must advertise BINARY+TIMELINE");
+    assert((ts.consumer_caps_mem_hints & WW_MEM_HINT_HOST_VISIBLE) != 0 &&
+           "expected HOST_VISIBLE in mem_hints");
+    assert((ts.consumer_caps_mem_hints & WW_MEM_HINT_LINEAR_ONLY) != 0 &&
+           "expected LINEAR_ONLY in mem_hints (no backend → fallback)");
+    assert((ts.consumer_caps_mem_hints & WW_MEM_HINT_DEVICE_LOCAL) == 0 &&
+           "DEVICE_LOCAL must not be advertised without Vulkan probe");
+    assert((ts.consumer_caps_sync_caps & (WW_SYNC_SYNCOBJ_BINARY | WW_SYNC_SYNCOBJ_TIMELINE)) ==
+               (WW_SYNC_SYNCOBJ_BINARY | WW_SYNC_SYNCOBJ_TIMELINE) &&
+           "sync_caps must advertise BINARY+TIMELINE");
 
     waywallen_display_close(d);
     waywallen_display_free(d);
     ts_teardown(&ts);
     printf("  ok test_consumer_caps_signals_linear_only_when_no_backend "
            "(mem_hints=0x%x sync_caps=0x%x)\n",
-           ts.consumer_caps_mem_hints, ts.consumer_caps_sync_caps);
+           ts.consumer_caps_mem_hints,
+           ts.consumer_caps_sync_caps);
 }
 
 static void test_partial_welcome(void) {
@@ -597,9 +592,9 @@ static void test_partial_welcome(void) {
     ts_init(&ts);
     pthread_t srv = spawn_server(&ts, handler_partial_welcome);
 
-    waywallen_display_t *d = make_client(&ts);
-    int rc = waywallen_display_begin_connect(d, ts.sock_path, "test-display",
-                                             NULL, 1920, 1080, 60000);
+    waywallen_display_t* d = make_client(&ts);
+    int                  rc =
+        waywallen_display_begin_connect(d, ts.sock_path, "test-display", NULL, 1920, 1080, 60000);
     assert(rc == WAYWALLEN_OK);
     rc = drive_handshake(d, 2000);
     assert(rc == WAYWALLEN_OK);
@@ -617,9 +612,9 @@ static void test_server_closes_during_welcome_wait(void) {
     ts_init(&ts);
     pthread_t srv = spawn_server(&ts, handler_close_after_hello);
 
-    waywallen_display_t *d = make_client(&ts);
-    int rc = waywallen_display_begin_connect(d, ts.sock_path, "test-display",
-                                             NULL, 1920, 1080, 60000);
+    waywallen_display_t* d = make_client(&ts);
+    int                  rc =
+        waywallen_display_begin_connect(d, ts.sock_path, "test-display", NULL, 1920, 1080, 60000);
     assert(rc == WAYWALLEN_OK);
     rc = drive_handshake(d, 1000);
     assert(rc == WAYWALLEN_ERR_NOTCONN);
@@ -636,9 +631,9 @@ static void test_server_sends_error_event(void) {
     ts_init(&ts);
     pthread_t srv = spawn_server(&ts, handler_send_error_after_hello);
 
-    waywallen_display_t *d = make_client(&ts);
-    int rc = waywallen_display_begin_connect(d, ts.sock_path, "test-display",
-                                             NULL, 1920, 1080, 60000);
+    waywallen_display_t* d = make_client(&ts);
+    int                  rc =
+        waywallen_display_begin_connect(d, ts.sock_path, "test-display", NULL, 1920, 1080, 60000);
     assert(rc == WAYWALLEN_OK);
     rc = drive_handshake(d, 1000);
     assert(rc == WAYWALLEN_ERR_PROTO);

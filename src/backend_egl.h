@@ -25,18 +25,18 @@
 
 #ifdef WW_HAVE_EGL
 
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
+#    include <EGL/egl.h>
+#    include <EGL/eglext.h>
+#    include <GLES2/gl2.h>
+#    include <GLES2/gl2ext.h>
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#    include <stdbool.h>
+#    include <stddef.h>
+#    include <stdint.h>
 
-#ifdef __cplusplus
+#    ifdef __cplusplus
 extern "C" {
-#endif
+#    endif
 
 /* ------------------------------------------------------------------ */
 /*  Function pointer table                                             */
@@ -45,19 +45,19 @@ extern "C" {
 typedef struct ww_egl_backend {
     /* Core EGL (resolved from libEGL.so.1). */
     PFNEGLGETPROCADDRESSPROC eglGetProcAddress;
-    EGLBoolean (*eglInitialize)(EGLDisplay, EGLint *, EGLint *);
-    const char *(*eglQueryString)(EGLDisplay, EGLint);
+    EGLBoolean (*eglInitialize)(EGLDisplay, EGLint*, EGLint*);
+    const char* (*eglQueryString)(EGLDisplay, EGLint);
 
     /* Extensions. Resolved via eglGetProcAddress. Any may be NULL if
      * the runtime driver lacks the corresponding extension, in which
      * case the loader returns -ENOSYS. */
-    PFNEGLCREATEIMAGEKHRPROC            eglCreateImageKHR;
-    PFNEGLDESTROYIMAGEKHRPROC           eglDestroyImageKHR;
-    PFNEGLCREATESYNCKHRPROC             eglCreateSyncKHR;
-    PFNEGLDESTROYSYNCKHRPROC            eglDestroySyncKHR;
-    PFNEGLWAITSYNCKHRPROC               eglWaitSyncKHR;
-    PFNEGLCLIENTWAITSYNCKHRPROC         eglClientWaitSyncKHR;
-    PFNEGLDUPNATIVEFENCEFDANDROIDPROC   eglDupNativeFenceFDANDROID;
+    PFNEGLCREATEIMAGEKHRPROC          eglCreateImageKHR;
+    PFNEGLDESTROYIMAGEKHRPROC         eglDestroyImageKHR;
+    PFNEGLCREATESYNCKHRPROC           eglCreateSyncKHR;
+    PFNEGLDESTROYSYNCKHRPROC          eglDestroySyncKHR;
+    PFNEGLWAITSYNCKHRPROC             eglWaitSyncKHR;
+    PFNEGLCLIENTWAITSYNCKHRPROC       eglClientWaitSyncKHR;
+    PFNEGLDUPNATIVEFENCEFDANDROIDPROC eglDupNativeFenceFDANDROID;
 
     /* GL_OES_EGL_image entry point. */
     PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES;
@@ -70,8 +70,8 @@ typedef struct ww_egl_backend {
     PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT;
 
     /* Core GLES2 (resolved from libGLESv2.so.2). */
-    void (*glGenTextures)(GLsizei, GLuint *);
-    void (*glDeleteTextures)(GLsizei, const GLuint *);
+    void (*glGenTextures)(GLsizei, GLuint*);
+    void (*glDeleteTextures)(GLsizei, const GLuint*);
     void (*glBindTexture)(GLenum, GLuint);
     void (*glTexParameteri)(GLenum, GLenum, GLint);
 
@@ -84,55 +84,50 @@ typedef struct ww_egl_backend {
  * `eglGetProcAddress`. When non-NULL it is called first for every
  * symbol (both core and extension) and only falls back if it returns
  * NULL. */
-typedef void *(*ww_egl_get_proc_address_fn)(const char *name);
+typedef void* (*ww_egl_get_proc_address_fn)(const char* name);
 
 /* Populate the function-pointer table. Returns 0 on success, -errno
  * on failure (typically -ENOSYS if a required extension symbol is
  * missing, or -ENOENT if libEGL/libGLESv2 can't be dlopened). */
-int ww_egl_backend_load(ww_egl_backend_t *backend,
+int ww_egl_backend_load(ww_egl_backend_t*          backend,
                         ww_egl_get_proc_address_fn host_get_proc_address);
 
 /* Release dlopen handles the backend may have opened. Safe to call
  * on a zero-initialised backend. */
-void ww_egl_backend_unload(ww_egl_backend_t *backend);
+void ww_egl_backend_unload(ww_egl_backend_t* backend);
 
 /* ------------------------------------------------------------------ */
 /*  DMA-BUF import                                                     */
 /* ------------------------------------------------------------------ */
 
-#define WW_EGL_MAX_PLANES 4
+#    define WW_EGL_MAX_PLANES 4
 
 typedef struct ww_egl_dmabuf_import {
     EGLDisplay egl_display;
-    uint32_t fourcc;
-    uint32_t width;
-    uint32_t height;
-    uint64_t modifier;         /* DRM_FORMAT_MOD_*; use LINEAR for untiled */
-    uint32_t n_planes;         /* 1..WW_EGL_MAX_PLANES */
-    int fds[WW_EGL_MAX_PLANES];
-    uint32_t strides[WW_EGL_MAX_PLANES];
-    uint32_t offsets[WW_EGL_MAX_PLANES];
+    uint32_t   fourcc;
+    uint32_t   width;
+    uint32_t   height;
+    uint64_t   modifier; /* DRM_FORMAT_MOD_*; use LINEAR for untiled */
+    uint32_t   n_planes; /* 1..WW_EGL_MAX_PLANES */
+    int        fds[WW_EGL_MAX_PLANES];
+    uint32_t   strides[WW_EGL_MAX_PLANES];
+    uint32_t   offsets[WW_EGL_MAX_PLANES];
 } ww_egl_dmabuf_import_t;
 
 /* Build an EGLImageKHR from a DMA-BUF set. On success `*out_image`
  * is populated and owned by the caller, who must later release it
  * via `ww_egl_destroy_image`. The input file descriptors are NOT
  * closed by this function — the EGL driver dup2's them internally. */
-int ww_egl_import_dmabuf(const ww_egl_backend_t *backend,
-                         const ww_egl_dmabuf_import_t *import,
-                         EGLImageKHR *out_image);
+int ww_egl_import_dmabuf(const ww_egl_backend_t* backend, const ww_egl_dmabuf_import_t* import,
+                         EGLImageKHR* out_image);
 
 /* Destroy an EGLImage returned by ww_egl_import_dmabuf. */
-void ww_egl_destroy_image(const ww_egl_backend_t *backend,
-                          EGLDisplay display,
-                          EGLImageKHR image);
+void ww_egl_destroy_image(const ww_egl_backend_t* backend, EGLDisplay display, EGLImageKHR image);
 
 /* Create a fresh GL_TEXTURE_EXTERNAL_OES texture, bind the EGLImage
  * to it, and return its name. Caller must have a GL context current
  * on the calling thread. */
-int ww_egl_texture_from_image(const ww_egl_backend_t *backend,
-                              EGLImageKHR image,
-                              GLuint *out_tex);
+int ww_egl_texture_from_image(const ww_egl_backend_t* backend, EGLImageKHR image, GLuint* out_tex);
 
 /* ------------------------------------------------------------------ */
 /*  DRM render-node introspection                                      */
@@ -152,10 +147,8 @@ int ww_egl_texture_from_image(const ww_egl_backend_t *backend,
  * "unknown" and report `(0, 0)` so the daemon falls back to the
  * cross-GPU host-visible path.
  */
-int ww_egl_query_drm_render_node(const ww_egl_backend_t *backend,
-                                 EGLDisplay egl_display,
-                                 uint32_t *out_major,
-                                 uint32_t *out_minor);
+int ww_egl_query_drm_render_node(const ww_egl_backend_t* backend, EGLDisplay egl_display,
+                                 uint32_t* out_major, uint32_t* out_minor);
 
 /* ------------------------------------------------------------------ */
 /*  Format/modifier capability probe                                   */
@@ -166,10 +159,8 @@ int ww_egl_query_drm_render_node(const ww_egl_backend_t *backend,
  * each accepted (fourcc, modifier) pair to the caller. `plane_count`
  * mirrors the wire field in `consumer_caps`.
  */
-typedef void (*ww_egl_caps_emit_fn)(uint32_t fourcc,
-                                    uint64_t modifier,
-                                    uint32_t plane_count,
-                                    void *user_data);
+typedef void (*ww_egl_caps_emit_fn)(uint32_t fourcc, uint64_t modifier, uint32_t plane_count,
+                                    void* user_data);
 
 /*
  * Enumerate the (fourcc, modifier) set the driver advertises as
@@ -181,10 +172,8 @@ typedef void (*ww_egl_caps_emit_fn)(uint32_t fourcc,
  * -errno from a failed query. On any error `emit` is not invoked at
  * all, so the caller can safely fall back to a hardcoded cap set.
  */
-int ww_egl_query_format_caps(const ww_egl_backend_t *backend,
-                             EGLDisplay egl_display,
-                             ww_egl_caps_emit_fn emit,
-                             void *user_data);
+int ww_egl_query_format_caps(const ww_egl_backend_t* backend, EGLDisplay egl_display,
+                             ww_egl_caps_emit_fn emit, void* user_data);
 
 /* ------------------------------------------------------------------ */
 /*  Acquire sync fence                                                 */
@@ -198,13 +187,11 @@ int ww_egl_query_format_caps(const ww_egl_backend_t *backend,
  *
  * Requires the driver to advertise `EGL_ANDROID_native_fence_sync`.
  */
-int ww_egl_wait_sync_fd(const ww_egl_backend_t *backend,
-                        EGLDisplay display,
-                        int sync_fd);
+int ww_egl_wait_sync_fd(const ww_egl_backend_t* backend, EGLDisplay display, int sync_fd);
 
-#ifdef __cplusplus
+#    ifdef __cplusplus
 }
-#endif
+#    endif
 
 #endif /* WW_HAVE_EGL */
 

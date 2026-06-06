@@ -32,7 +32,8 @@ G_BEGIN_DECLS
  * Mirror of waywallen_handshake_state_t. Kept in sync manually; if the
  * C ABI grows new states we update this enum and rerun g-ir-scanner.
  */
-typedef enum {
+typedef enum
+{
     WW_HANDSHAKE_STATE_IDLE          = 0,
     WW_HANDSHAKE_STATE_CONNECTING    = 1,
     WW_HANDSHAKE_STATE_HELLO_PENDING = 2,
@@ -42,7 +43,8 @@ typedef enum {
     WW_HANDSHAKE_STATE_READY         = 6,
 } WwHandshakeState;
 
-typedef enum {
+typedef enum
+{
     WW_HANDSHAKE_RESULT_DONE       = 1,
     WW_HANDSHAKE_RESULT_NEED_READ  = 2,
     WW_HANDSHAKE_RESULT_NEED_WRITE = 3,
@@ -60,7 +62,7 @@ G_DECLARE_FINAL_TYPE(WwDisplay, ww_display, WW, DISPLAY, GObject)
  *
  * Returns: (transfer full): a new #WwDisplay
  */
-WwDisplay *ww_display_new(void);
+WwDisplay* ww_display_new(void);
 
 /**
  * ww_display_bind_dmabuf_relay:
@@ -76,7 +78,7 @@ WwDisplay *ww_display_new(void);
  *
  * Returns: TRUE on success
  */
-gboolean ww_display_bind_dmabuf_relay(WwDisplay *self);
+gboolean ww_display_bind_dmabuf_relay(WwDisplay* self);
 
 /**
  * ww_display_get_shadow_export:
@@ -99,12 +101,9 @@ gboolean ww_display_bind_dmabuf_relay(WwDisplay *self);
  * Returns: TRUE on success; FALSE if the current backend isn't
  * DMABUF_RELAY or no shadow has been allocated yet.
  */
-gboolean ww_display_get_shadow_export(WwDisplay *self,
-                                      gint *out_fd,
-                                      guint *out_n_planes,
-                                      guint out_strides[4],
-                                      guint64 out_offsets[4],
-                                      guint64 *out_modifier);
+gboolean ww_display_get_shadow_export(WwDisplay* self, gint* out_fd, guint* out_n_planes,
+                                      guint out_strides[4], guint64 out_offsets[4],
+                                      guint64* out_modifier);
 
 /**
  * ww_display_begin_connect:
@@ -121,13 +120,9 @@ gboolean ww_display_get_shadow_export(WwDisplay *self,
  *
  * Returns: TRUE on success
  */
-gboolean ww_display_begin_connect(WwDisplay *self,
-                                  const gchar *socket_path,
-                                  const gchar *display_name,
-                                  const gchar *instance_id,
-                                  guint width,
-                                  guint height,
-                                  guint refresh_mhz);
+gboolean ww_display_begin_connect(WwDisplay* self, const gchar* socket_path,
+                                  const gchar* display_name, const gchar* instance_id, guint width,
+                                  guint height, guint refresh_mhz);
 
 /**
  * ww_display_advance_handshake:
@@ -136,7 +131,7 @@ gboolean ww_display_begin_connect(WwDisplay *self,
  * Returns: a #WwHandshakeResult code, or a negative errno-ish value on
  *   failure (which also fires `disconnected`).
  */
-gint ww_display_advance_handshake(WwDisplay *self);
+gint ww_display_advance_handshake(WwDisplay* self);
 
 /**
  * ww_display_handshake_state:
@@ -144,7 +139,7 @@ gint ww_display_advance_handshake(WwDisplay *self);
  *
  * Returns: the current #WwHandshakeState
  */
-WwHandshakeState ww_display_handshake_state(WwDisplay *self);
+WwHandshakeState ww_display_handshake_state(WwDisplay* self);
 
 /**
  * ww_display_get_fd:
@@ -153,7 +148,7 @@ WwHandshakeState ww_display_handshake_state(WwDisplay *self);
  * Returns: the socket fd to integrate with a poll loop, or -1 if not
  *   connected. Do NOT close this fd.
  */
-gint ww_display_get_fd(WwDisplay *self);
+gint ww_display_get_fd(WwDisplay* self);
 
 /**
  * ww_display_dispatch:
@@ -163,7 +158,7 @@ gint ww_display_get_fd(WwDisplay *self);
  *
  * Returns: number of frames dispatched (>= 0), or negative on failure.
  */
-gint ww_display_dispatch(WwDisplay *self);
+gint ww_display_dispatch(WwDisplay* self);
 
 /**
  * ww_display_update_size:
@@ -173,9 +168,7 @@ gint ww_display_dispatch(WwDisplay *self);
  *
  * Returns: TRUE on success
  */
-gboolean ww_display_update_size(WwDisplay *self,
-                                guint width,
-                                guint height);
+gboolean ww_display_update_size(WwDisplay* self, guint width, guint height);
 
 /**
  * ww_display_close_fd:
@@ -197,8 +190,8 @@ void ww_display_close_fd(gint fd);
  * Best-effort forward of a pointer motion to the daemon, which reverse-
  * projects it onto the renderer's texture via the active layout.
  */
-void ww_display_send_pointer_motion(WwDisplay *self, gdouble x, gdouble y,
-                                    guint64 timestamp_us, guint modifiers);
+void ww_display_send_pointer_motion(WwDisplay* self, gdouble x, gdouble y, guint64 timestamp_us,
+                                    guint modifiers);
 
 /**
  * ww_display_send_pointer_button:
@@ -209,9 +202,8 @@ void ww_display_send_pointer_motion(WwDisplay *self, gdouble x, gdouble y,
  * @timestamp_us: monotonic microseconds, or 0
  * @modifiers: Linux modifier mask, or 0
  */
-void ww_display_send_pointer_button(WwDisplay *self, gdouble x, gdouble y,
-                                    guint button, gboolean pressed,
-                                    guint64 timestamp_us, guint modifiers);
+void ww_display_send_pointer_button(WwDisplay* self, gdouble x, gdouble y, guint button,
+                                    gboolean pressed, guint64 timestamp_us, guint modifiers);
 
 /**
  * ww_display_send_pointer_axis:
@@ -221,8 +213,7 @@ void ww_display_send_pointer_button(WwDisplay *self, gdouble x, gdouble y,
  * @timestamp_us: monotonic microseconds, or 0
  * @modifiers: Linux modifier mask, or 0
  */
-void ww_display_send_pointer_axis(WwDisplay *self, gdouble x, gdouble y,
-                                  gdouble dx, gdouble dy,
+void ww_display_send_pointer_axis(WwDisplay* self, gdouble x, gdouble y, gdouble dx, gdouble dy,
                                   guint64 timestamp_us, guint modifiers);
 
 /**
@@ -234,13 +225,13 @@ void ww_display_send_pointer_axis(WwDisplay *self, gdouble x, gdouble y,
  * Report covering-window state for autopause. Fire-and-forget — the
  * daemon owns all pause policy; the caller must not debounce or filter.
  */
-void ww_display_set_window_state(WwDisplay *self, guint flags);
+void ww_display_set_window_state(WwDisplay* self, guint flags);
 
 /**
  * ww_display_disconnect:
  * @self: a #WwDisplay
  */
-void ww_display_disconnect(WwDisplay *self);
+void ww_display_disconnect(WwDisplay* self);
 
 G_END_DECLS
 

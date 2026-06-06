@@ -18,8 +18,7 @@
 G_BEGIN_DECLS
 
 #define WW_TYPE_SHADOW_PAINTABLE (ww_shadow_paintable_get_type())
-G_DECLARE_FINAL_TYPE(WwShadowPaintable, ww_shadow_paintable,
-                     WW, SHADOW_PAINTABLE, GObject)
+G_DECLARE_FINAL_TYPE(WwShadowPaintable, ww_shadow_paintable, WW, SHADOW_PAINTABLE, GObject)
 
 /**
  * ww_shadow_paintable_new:
@@ -29,7 +28,7 @@ G_DECLARE_FINAL_TYPE(WwShadowPaintable, ww_shadow_paintable,
  *   ww_shadow_paintable_set_shadow() once the producer publishes a
  *   shadow descriptor, then ww_shadow_paintable_refresh() per frame.
  */
-WwShadowPaintable *ww_shadow_paintable_new(void);
+WwShadowPaintable* ww_shadow_paintable_new(void);
 
 /**
  * ww_shadow_paintable_set_shadow:
@@ -50,15 +49,9 @@ WwShadowPaintable *ww_shadow_paintable_new(void);
  *
  * Returns: TRUE on success
  */
-gboolean ww_shadow_paintable_set_shadow(WwShadowPaintable *self,
-                                        gint fd,
-                                        guint n_planes,
-                                        guint width,
-                                        guint height,
-                                        guint fourcc,
-                                        guint64 modifier,
-                                        const guint *strides,
-                                        const guint64 *offsets);
+gboolean ww_shadow_paintable_set_shadow(WwShadowPaintable* self, gint fd, guint n_planes,
+                                        guint width, guint height, guint fourcc, guint64 modifier,
+                                        const guint* strides, const guint64* offsets);
 
 /**
  * ww_shadow_paintable_refresh:
@@ -70,7 +63,7 @@ gboolean ww_shadow_paintable_set_shadow(WwShadowPaintable *self,
  * content tracks producer writes. Cheap (FD dup + ~512 B object); call
  * once per producer frame_ready.
  */
-void ww_shadow_paintable_refresh(WwShadowPaintable *self);
+void ww_shadow_paintable_refresh(WwShadowPaintable* self);
 
 /**
  * ww_shadow_paintable_set_config:
@@ -85,11 +78,9 @@ void ww_shadow_paintable_refresh(WwShadowPaintable *self);
  * the WwDisplay::config signal. Until this is called the paintable
  * stretches the whole shadow over the widget.
  */
-void ww_shadow_paintable_set_config(WwShadowPaintable *self,
-                                    double sx, double sy, double sw, double sh,
-                                    double dx, double dy, double dw, double dh,
-                                    guint transform,
-                                    double cr, double cg, double cb, double ca);
+void ww_shadow_paintable_set_config(WwShadowPaintable* self, double sx, double sy, double sw,
+                                    double sh, double dx, double dy, double dw, double dh,
+                                    guint transform, double cr, double cg, double cb, double ca);
 
 /**
  * ww_shadow_paintable_clear:
@@ -98,7 +89,7 @@ void ww_shadow_paintable_set_config(WwShadowPaintable *self,
  * Release the texture + shadow fd; paintable renders empty until the
  * next set_shadow().
  */
-void ww_shadow_paintable_clear(WwShadowPaintable *self);
+void ww_shadow_paintable_clear(WwShadowPaintable* self);
 
 G_END_DECLS
 

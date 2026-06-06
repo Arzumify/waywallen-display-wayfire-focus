@@ -21,13 +21,13 @@
 
 #include <assert.h>
 #include <errno.h>
-#include <stdio.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifdef WW_HAVE_EGL
 
-#include "backend_egl.h"
+#    include "backend_egl.h"
 
 /* Non-trivial sentinel: a real function address so the returned
  * `void *` is genuinely callable (if anything ever tried, it'd just
@@ -36,15 +36,18 @@ static void sentinel_fn(void) {}
 
 static int mock_call_count = 0;
 
-static void *mock_get_proc_address(const char *name) {
+static void* mock_get_proc_address(const char* name) {
     (void)name;
     mock_call_count++;
-    union { void *obj; void (*func)(void); } c;
+    union {
+        void* obj;
+        void (*func)(void);
+    } c;
     c.func = &sentinel_fn;
     return c.obj;
 }
 
-static void *null_get_proc_address(const char *name) {
+static void* null_get_proc_address(const char* name) {
     (void)name;
     return NULL;
 }
@@ -81,7 +84,7 @@ static void test_mock_loader(void) {
     assert(mock_call_count >= 14);
 
     ww_egl_backend_unload(&backend);
-    assert(!backend.loaded);
+    assert(! backend.loaded);
     printf("  ok test_mock_loader (%d symbol queries)\n", mock_call_count);
 }
 
@@ -114,7 +117,7 @@ int main(void) {
     return 0;
 }
 
-#else  /* !WW_HAVE_EGL */
+#else /* !WW_HAVE_EGL */
 
 int main(void) {
     printf("test_backend_egl: SKIP (WW_HAVE_EGL not set)\n");

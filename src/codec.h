@@ -23,34 +23,26 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>  /* ssize_t */
+#include <sys/types.h> /* ssize_t */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define WW_CODEC_MAX_BODY_BYTES  ((size_t)65531)  /* u16 max - 4 header */
+#define WW_CODEC_MAX_BODY_BYTES  ((size_t)65531) /* u16 max - 4 header */
 #define WW_CODEC_MAX_FDS_PER_MSG ((size_t)64)
 
-int ww_codec_send_request(int fd,
-                          uint16_t op,
-                          const uint8_t *body, size_t body_len,
-                          const int *fds, size_t n_fds);
+int ww_codec_send_request(int fd, uint16_t op, const uint8_t* body, size_t body_len, const int* fds,
+                          size_t n_fds);
 
-int ww_codec_send_event(int fd,
-                        uint16_t op,
-                        const uint8_t *body, size_t body_len,
-                        const int *fds, size_t n_fds);
+int ww_codec_send_event(int fd, uint16_t op, const uint8_t* body, size_t body_len, const int* fds,
+                        size_t n_fds);
 
-int ww_codec_recv_request(int fd,
-                          uint16_t *op,
-                          uint8_t *body_buf, size_t body_cap, size_t *body_len,
-                          int *fd_buf, size_t fd_cap, size_t *n_fds);
+int ww_codec_recv_request(int fd, uint16_t* op, uint8_t* body_buf, size_t body_cap,
+                          size_t* body_len, int* fd_buf, size_t fd_cap, size_t* n_fds);
 
-int ww_codec_recv_event(int fd,
-                        uint16_t *op,
-                        uint8_t *body_buf, size_t body_cap, size_t *body_len,
-                        int *fd_buf, size_t fd_cap, size_t *n_fds);
+int ww_codec_recv_event(int fd, uint16_t* op, uint8_t* body_buf, size_t body_cap, size_t* body_len,
+                        int* fd_buf, size_t fd_cap, size_t* n_fds);
 
 /* ------------------------------------------------------------------ */
 /* Non-blocking partial-frame primitives                              */
@@ -60,8 +52,8 @@ int ww_codec_recv_event(int fd,
 /* additionally pass MSG_DONTWAIT defensively.                        */
 /* ------------------------------------------------------------------ */
 
-#define WW_CODEC_FRAME_DONE  1  /* full frame in `st`; caller decodes */
-#define WW_CODEC_FRAME_NEED  2  /* fd not ready, arm POLLIN, retry    */
+#define WW_CODEC_FRAME_DONE 1 /* full frame in `st`; caller decodes */
+#define WW_CODEC_FRAME_NEED 2 /* fd not ready, arm POLLIN, retry    */
 
 /*
  * State bag for incremental recv of one framed event/request. Reusable
@@ -70,19 +62,19 @@ int ww_codec_recv_event(int fd,
  */
 typedef struct ww_codec_recv_state {
     uint8_t  hdr[4];
-    size_t   hdr_filled;       /* 0..4 */
-    uint16_t op;               /* valid once hdr_filled == 4         */
-    size_t   body_len;         /* valid once hdr_filled == 4         */
+    size_t   hdr_filled; /* 0..4 */
+    uint16_t op;         /* valid once hdr_filled == 4         */
+    size_t   body_len;   /* valid once hdr_filled == 4         */
     uint8_t  body[WW_CODEC_MAX_BODY_BYTES];
     size_t   body_filled;
     int      fds[WW_CODEC_MAX_FDS_PER_MSG];
     size_t   n_fds;
 } ww_codec_recv_state_t;
 
-void ww_codec_recv_state_init (ww_codec_recv_state_t *st);
+void ww_codec_recv_state_init(ww_codec_recv_state_t* st);
 /* Close any unclaimed fds and zero the state. Call after handing the
  * frame to the caller (who took the fds it wanted). */
-void ww_codec_recv_state_reset(ww_codec_recv_state_t *st);
+void ww_codec_recv_state_reset(ww_codec_recv_state_t* st);
 
 /*
  * Non-blocking single-shot receive. Returns:
@@ -90,7 +82,7 @@ void ww_codec_recv_state_reset(ww_codec_recv_state_t *st);
  *   WW_CODEC_FRAME_NEED — recv would block; rearm POLLIN and retry.
  *   <0                  — fatal -errno (incl. -ECONNRESET on peer EOF).
  */
-int ww_codec_recv_partial(int fd, ww_codec_recv_state_t *st);
+int ww_codec_recv_partial(int fd, ww_codec_recv_state_t* st);
 
 /*
  * Non-blocking single sendmsg of raw bytes (no SCM_RIGHTS). Returns:
@@ -101,7 +93,7 @@ int ww_codec_recv_partial(int fd, ww_codec_recv_state_t *st);
  * Handshake frames carry no fds, so a plain send() suffices. For
  * fd-bearing frames keep using ww_codec_send_event/_request.
  */
-ssize_t ww_codec_send_partial(int fd, const uint8_t *buf, size_t len);
+ssize_t ww_codec_send_partial(int fd, const uint8_t* buf, size_t len);
 
 #ifdef __cplusplus
 }

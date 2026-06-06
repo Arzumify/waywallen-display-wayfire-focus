@@ -32,27 +32,30 @@
 
 /* EGL_PLATFORM_GBM_KHR / _MESA — use whichever the headers define. */
 #ifndef EGL_PLATFORM_GBM_KHR
-#  ifdef EGL_PLATFORM_GBM_MESA
-#    define EGL_PLATFORM_GBM_KHR EGL_PLATFORM_GBM_MESA
-#  else
-#    define EGL_PLATFORM_GBM_KHR 0x31D7
-#  endif
+#    ifdef EGL_PLATFORM_GBM_MESA
+#        define EGL_PLATFORM_GBM_KHR EGL_PLATFORM_GBM_MESA
+#    else
+#        define EGL_PLATFORM_GBM_KHR 0x31D7
+#    endif
 #endif
 
 struct state {
     int64_t frames_seen;
     int64_t max_frames;
-    int disconnected;
-    int textures_valid;
+    int     disconnected;
+    int     textures_valid;
 };
 
-static void on_textures_ready(void *ud, const waywallen_textures_t *t) {
-    struct state *s = (struct state *)ud;
+static void on_textures_ready(void* ud, const waywallen_textures_t* t) {
+    struct state* s   = (struct state*)ud;
     s->textures_valid = (t->backend == WAYWALLEN_BACKEND_EGL && t->gl_textures != NULL);
     fprintf(stderr,
-        "[egl] textures_ready: count=%u %ux%u backend=%d gl_textures=%s\n",
-        t->count, t->tex_width, t->tex_height, (int)t->backend,
-        t->gl_textures ? "YES" : "NULL");
+            "[egl] textures_ready: count=%u %ux%u backend=%d gl_textures=%s\n",
+            t->count,
+            t->tex_width,
+            t->tex_height,
+            (int)t->backend,
+            t->gl_textures ? "YES" : "NULL");
     if (t->gl_textures) {
         for (uint32_t i = 0; i < t->count; i++) {
             fprintf(stderr, "  tex[%u] = GL name %u\n", i, t->gl_textures[i]);
@@ -60,29 +63,34 @@ static void on_textures_ready(void *ud, const waywallen_textures_t *t) {
     }
 }
 
-static void on_textures_releasing(void *ud, const waywallen_textures_t *t) {
-    struct state *s = (struct state *)ud;
+static void on_textures_releasing(void* ud, const waywallen_textures_t* t) {
+    struct state* s   = (struct state*)ud;
     s->textures_valid = 0;
     fprintf(stderr, "[egl] textures_releasing: count=%u\n", t->count);
 }
 
-static void on_config(void *ud, const waywallen_config_t *c) {
+static void on_config(void* ud, const waywallen_config_t* c) {
     (void)ud;
     fprintf(stderr,
-        "[egl] config: src=(%.0f,%.0f,%.0f,%.0f) dst=(%.0f,%.0f,%.0f,%.0f)\n",
-        (double)c->source_rect.x, (double)c->source_rect.y,
-        (double)c->source_rect.w, (double)c->source_rect.h,
-        (double)c->dest_rect.x, (double)c->dest_rect.y,
-        (double)c->dest_rect.w, (double)c->dest_rect.h);
+            "[egl] config: src=(%.0f,%.0f,%.0f,%.0f) dst=(%.0f,%.0f,%.0f,%.0f)\n",
+            (double)c->source_rect.x,
+            (double)c->source_rect.y,
+            (double)c->source_rect.w,
+            (double)c->source_rect.h,
+            (double)c->dest_rect.x,
+            (double)c->dest_rect.y,
+            (double)c->dest_rect.w,
+            (double)c->dest_rect.h);
 }
 
-static void on_frame_ready(void *ud, const waywallen_frame_t *f) {
-    struct state *s = (struct state *)ud;
+static void on_frame_ready(void* ud, const waywallen_frame_t* f) {
+    struct state* s = (struct state*)ud;
     s->frames_seen++;
     fprintf(stderr,
-        "[egl] frame #%lld: idx=%u seq=%llu (sync already waited by library)\n",
-        (long long)s->frames_seen, f->buffer_index,
-        (unsigned long long)f->seq);
+            "[egl] frame #%lld: idx=%u seq=%llu (sync already waited by library)\n",
+            (long long)s->frames_seen,
+            f->buffer_index,
+            (unsigned long long)f->seq);
     // Signal the per-frame release_syncobj so the daemon's reaper sees
     // a real release instead of timing out and force-signaling. This
     // demo doesn't actually GPU-render the texture, so signaling
@@ -90,30 +98,28 @@ static void on_frame_ready(void *ud, const waywallen_frame_t *f) {
     // buffer" moment to defer to. The helper closes the fd in all
     // paths.
     if (f->release_syncobj_fd >= 0) {
-        (void)waywallen_display_signal_release_syncobj(
-            f->release_syncobj_fd);
+        (void)waywallen_display_signal_release_syncobj(f->release_syncobj_fd);
     }
 }
 
-static void on_disconnected(void *ud, int code, const char *msg) {
-    struct state *s = (struct state *)ud;
+static void on_disconnected(void* ud, int code, const char* msg) {
+    struct state* s = (struct state*)ud;
     s->disconnected = 1;
-    fprintf(stderr, "[egl] disconnected: code=%d msg=%s\n",
-            code, msg ? msg : "(null)");
+    fprintf(stderr, "[egl] disconnected: code=%d msg=%s\n", code, msg ? msg : "(null)");
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
     signal(SIGPIPE, SIG_IGN);
 
-    int exit_code = 1;
-    const char *socket_path = NULL;
-    const char *render_node = "/dev/dri/renderD128";
-    const char *name = "minimal-egl";
-    int64_t max_frames = 5;
+    int         exit_code   = 1;
+    const char* socket_path = NULL;
+    const char* render_node = "/dev/dri/renderD128";
+    const char* name        = "minimal-egl";
+    int64_t     max_frames  = 5;
 
     for (int i = 1; i < argc; i++) {
-        if ((strcmp(argv[i], "--socket") == 0 || strcmp(argv[i], "--display-sock") == 0)
-            && i + 1 < argc) {
+        if ((strcmp(argv[i], "--socket") == 0 || strcmp(argv[i], "--display-sock") == 0) &&
+            i + 1 < argc) {
             socket_path = argv[++i];
         } else if (strcmp(argv[i], "--render-node") == 0 && i + 1 < argc) {
             render_node = argv[++i];
@@ -123,8 +129,8 @@ int main(int argc, char **argv) {
             max_frames = atoll(argv[++i]);
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             fprintf(stderr,
-                "usage: minimal_egl [--socket PATH] [--render-node PATH] "
-                "[--max-frames N] [--name STR]\n");
+                    "usage: minimal_egl [--socket PATH] [--render-node PATH] "
+                    "[--max-frames N] [--name STR]\n");
             return 0;
         }
     }
@@ -135,15 +141,14 @@ int main(int argc, char **argv) {
         perror("open render node");
         return 1;
     }
-    struct gbm_device *gbm = gbm_create_device(drm_fd);
-    if (!gbm) {
+    struct gbm_device* gbm = gbm_create_device(drm_fd);
+    if (! gbm) {
         fprintf(stderr, "gbm_create_device failed\n");
         close(drm_fd);
         return 1;
     }
 
-    EGLDisplay egl_dpy = eglGetPlatformDisplay(EGL_PLATFORM_GBM_KHR,
-                                                (void *)gbm, NULL);
+    EGLDisplay egl_dpy = eglGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, (void*)gbm, NULL);
     if (egl_dpy == EGL_NO_DISPLAY) {
         fprintf(stderr, "eglGetPlatformDisplay failed\n");
         gbm_device_destroy(gbm);
@@ -151,68 +156,66 @@ int main(int argc, char **argv) {
         return 1;
     }
     EGLint major, minor;
-    if (!eglInitialize(egl_dpy, &major, &minor)) {
+    if (! eglInitialize(egl_dpy, &major, &minor)) {
         fprintf(stderr, "eglInitialize failed\n");
         gbm_device_destroy(gbm);
         close(drm_fd);
         return 1;
     }
-    fprintf(stderr, "EGL %d.%d on %s\n", major, minor,
-            eglQueryString(egl_dpy, EGL_VENDOR));
+    fprintf(stderr, "EGL %d.%d on %s\n", major, minor, eglQueryString(egl_dpy, EGL_VENDOR));
 
-    if (!eglBindAPI(EGL_OPENGL_ES_API)) {
+    if (! eglBindAPI(EGL_OPENGL_ES_API)) {
         fprintf(stderr, "eglBindAPI(GLES) failed\n");
         goto cleanup_egl;
     }
     EGLint cfg_attribs[] = {
-        EGL_SURFACE_TYPE, 0,  /* surfaceless */
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_SURFACE_TYPE,
+        0, /* surfaceless */
+        EGL_RENDERABLE_TYPE,
+        EGL_OPENGL_ES2_BIT,
         EGL_NONE,
     };
     EGLConfig config;
-    EGLint num_cfg;
-    if (!eglChooseConfig(egl_dpy, cfg_attribs, &config, 1, &num_cfg)
-        || num_cfg == 0) {
+    EGLint    num_cfg;
+    if (! eglChooseConfig(egl_dpy, cfg_attribs, &config, 1, &num_cfg) || num_cfg == 0) {
         fprintf(stderr, "eglChooseConfig failed\n");
         goto cleanup_egl;
     }
-    EGLint ctx_attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
-    EGLContext ctx = eglCreateContext(egl_dpy, config, EGL_NO_CONTEXT,
-                                     ctx_attribs);
+    EGLint     ctx_attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+    EGLContext ctx           = eglCreateContext(egl_dpy, config, EGL_NO_CONTEXT, ctx_attribs);
     if (ctx == EGL_NO_CONTEXT) {
         fprintf(stderr, "eglCreateContext failed\n");
         goto cleanup_egl;
     }
-    if (!eglMakeCurrent(egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx)) {
+    if (! eglMakeCurrent(egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx)) {
         fprintf(stderr, "eglMakeCurrent failed\n");
         eglDestroyContext(egl_dpy, ctx);
         goto cleanup_egl;
     }
-    fprintf(stderr, "GL: %s / %s\n",
-            glGetString(GL_RENDERER), glGetString(GL_VERSION));
+    fprintf(stderr, "GL: %s / %s\n", glGetString(GL_RENDERER), glGetString(GL_VERSION));
 
     /* ---- waywallen_display ---- */
     struct state st = {
-        .frames_seen = 0,
-        .max_frames = max_frames,
-        .disconnected = 0,
+        .frames_seen    = 0,
+        .max_frames     = max_frames,
+        .disconnected   = 0,
         .textures_valid = 0,
     };
     waywallen_display_callbacks_t cb = {
-        .on_textures_ready = on_textures_ready,
+        .on_textures_ready     = on_textures_ready,
         .on_textures_releasing = on_textures_releasing,
-        .on_config = on_config,
-        .on_frame_ready = on_frame_ready,
-        .on_disconnected = on_disconnected,
-        .user_data = &st,
+        .on_config             = on_config,
+        .on_frame_ready        = on_frame_ready,
+        .on_disconnected       = on_disconnected,
+        .user_data             = &st,
     };
-    waywallen_display_t *d = waywallen_display_new(&cb);
-    if (!d) {
+    waywallen_display_t* d = waywallen_display_new(&cb);
+    if (! d) {
         fprintf(stderr, "waywallen_display_new failed\n");
         goto cleanup_ctx;
     }
     waywallen_egl_ctx_t egl_ctx = {
-        .egl_display = egl_dpy,
+        .egl_display      = egl_dpy,
         .get_proc_address = NULL,
     };
     int rc = waywallen_display_bind_egl(d, &egl_ctx);
@@ -221,15 +224,14 @@ int main(int argc, char **argv) {
         waywallen_display_shutdown(d);
         goto cleanup_ctx;
     }
-    fprintf(stderr, "connecting to %s...\n",
-            socket_path ? socket_path
-                        : "$XDG_RUNTIME_DIR/waywallen/display.sock");
+    fprintf(stderr,
+            "connecting to %s...\n",
+            socket_path ? socket_path : "$XDG_RUNTIME_DIR/waywallen/display.sock");
 
     /* Async handshake — same shape as a GUI host using QSocketNotifier:
      * begin_connect kicks things off non-blocking, advance_handshake is
      * driven by poll readiness until DONE. */
-    rc = waywallen_display_begin_connect(d, socket_path, name, NULL,
-                                         640, 480, 60000);
+    rc = waywallen_display_begin_connect(d, socket_path, name, NULL, 640, 480, 60000);
     if (rc != WAYWALLEN_OK) {
         fprintf(stderr, "begin_connect failed: %d\n", rc);
         waywallen_display_shutdown(d);
@@ -245,18 +247,30 @@ int main(int argc, char **argv) {
             goto cleanup_ctx;
         }
         struct pollfd hp = { .fd = ww_fd, .events = 0, .revents = 0 };
-        if (rc == WAYWALLEN_HS_NEED_READ)       hp.events = POLLIN;
-        else if (rc == WAYWALLEN_HS_NEED_WRITE) hp.events = POLLOUT;
-        else                                    hp.events = POLLIN | POLLOUT;
+        if (rc == WAYWALLEN_HS_NEED_READ)
+            hp.events = POLLIN;
+        else if (rc == WAYWALLEN_HS_NEED_WRITE)
+            hp.events = POLLOUT;
+        else
+            hp.events = POLLIN | POLLOUT;
         int pn = poll(&hp, 1, -1);
-        if (pn < 0 && errno != EINTR) { perror("poll handshake"); goto cleanup_ctx; }
+        if (pn < 0 && errno != EINTR) {
+            perror("poll handshake");
+            goto cleanup_ctx;
+        }
     }
     fprintf(stderr, "connected; dispatch loop...\n");
-    while (!st.disconnected) {
+    while (! st.disconnected) {
         struct pollfd pfd = { .fd = ww_fd, .events = POLLIN, .revents = 0 };
-        int pr = poll(&pfd, 1, 2000);
-        if (pr < 0) { perror("poll"); break; }
-        if (pr == 0) { fprintf(stderr, "poll timeout\n"); break; }
+        int           pr  = poll(&pfd, 1, 2000);
+        if (pr < 0) {
+            perror("poll");
+            break;
+        }
+        if (pr == 0) {
+            fprintf(stderr, "poll timeout\n");
+            break;
+        }
         if (pfd.revents & (POLLERR | POLLHUP)) break;
         if (pfd.revents & POLLIN) {
             int r = waywallen_display_dispatch(d);
@@ -272,7 +286,8 @@ int main(int argc, char **argv) {
         exit_code = 0;
         fprintf(stderr, "SUCCESS: received real GL textures via EGL DMA-BUF import\n");
     } else if (st.frames_seen > 0) {
-        fprintf(stderr, "WARNING: frames received but textures were backend=NONE (import failed?)\n");
+        fprintf(stderr,
+                "WARNING: frames received but textures were backend=NONE (import failed?)\n");
         exit_code = 1;
     } else {
         fprintf(stderr, "WARNING: no frames received\n");

@@ -21,7 +21,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-static int make_memfd(const char *payload, size_t len) {
+static int make_memfd(const char* payload, size_t len) {
     int fd = memfd_create("test_codec", 0);
     if (fd < 0) {
         perror("memfd_create");
@@ -40,7 +40,7 @@ static int make_memfd(const char *payload, size_t len) {
     return fd;
 }
 
-static int read_file(int fd, char *buf, size_t cap) {
+static int read_file(int fd, char* buf, size_t cap) {
     ssize_t n = pread(fd, buf, cap - 1, 0);
     if (n < 0) return -1;
     buf[n] = '\0';
@@ -52,12 +52,11 @@ static void test_no_fds_no_body(int a, int b) {
     assert(rc == 0);
 
     uint16_t op = 0;
-    uint8_t body_buf[16];
-    size_t body_len = 99;
-    int fd_buf[4];
-    size_t n_fds = 99;
-    rc = ww_codec_recv_request(b, &op, body_buf, sizeof(body_buf), &body_len,
-                               fd_buf, 4, &n_fds);
+    uint8_t  body_buf[16];
+    size_t   body_len = 99;
+    int      fd_buf[4];
+    size_t   n_fds = 99;
+    rc = ww_codec_recv_request(b, &op, body_buf, sizeof(body_buf), &body_len, fd_buf, 4, &n_fds);
     assert(rc == 0);
     assert(op == 42);
     assert(body_len == 0);
@@ -66,17 +65,16 @@ static void test_no_fds_no_body(int a, int b) {
 }
 
 static void test_with_body(int a, int b) {
-    static const uint8_t body[] = {1, 2, 3, 4, 5, 6, 7, 8};
-    int rc = ww_codec_send_event(a, 7, body, sizeof(body), NULL, 0);
+    static const uint8_t body[] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    int                  rc     = ww_codec_send_event(a, 7, body, sizeof(body), NULL, 0);
     assert(rc == 0);
 
     uint16_t op = 0;
-    uint8_t body_buf[32];
-    size_t body_len = 0;
-    int fd_buf[4];
-    size_t n_fds = 0;
-    rc = ww_codec_recv_event(b, &op, body_buf, sizeof(body_buf), &body_len,
-                             fd_buf, 4, &n_fds);
+    uint8_t  body_buf[32];
+    size_t   body_len = 0;
+    int      fd_buf[4];
+    size_t   n_fds = 0;
+    rc = ww_codec_recv_event(b, &op, body_buf, sizeof(body_buf), &body_len, fd_buf, 4, &n_fds);
     assert(rc == 0);
     assert(op == 7);
     assert(body_len == sizeof(body));
@@ -91,22 +89,21 @@ static void test_with_fds(int a, int b) {
     int fd2 = make_memfd("bravo", 5);
     int fd3 = make_memfd("charlie", 7);
     assert(fd1 >= 0 && fd2 >= 0 && fd3 >= 0);
-    int send_fds[3] = {fd1, fd2, fd3};
+    int send_fds[3] = { fd1, fd2, fd3 };
 
-    static const uint8_t body[] = {0xde, 0xad, 0xbe, 0xef};
-    int rc = ww_codec_send_event(a, 99, body, sizeof(body), send_fds, 3);
+    static const uint8_t body[] = { 0xde, 0xad, 0xbe, 0xef };
+    int                  rc     = ww_codec_send_event(a, 99, body, sizeof(body), send_fds, 3);
     assert(rc == 0);
     close(fd1);
     close(fd2);
     close(fd3);
 
     uint16_t op = 0;
-    uint8_t body_buf[32];
-    size_t body_len = 0;
-    int recv_fds[8];
-    size_t n_fds = 0;
-    rc = ww_codec_recv_event(b, &op, body_buf, sizeof(body_buf), &body_len,
-                             recv_fds, 8, &n_fds);
+    uint8_t  body_buf[32];
+    size_t   body_len = 0;
+    int      recv_fds[8];
+    size_t   n_fds = 0;
+    rc = ww_codec_recv_event(b, &op, body_buf, sizeof(body_buf), &body_len, recv_fds, 8, &n_fds);
     assert(rc == 0);
     assert(op == 99);
     assert(body_len == 4);
@@ -130,25 +127,23 @@ static void test_with_fds(int a, int b) {
 
 static void test_back_to_back(int a, int b) {
     /* Two frames sent without draining in between. */
-    static const uint8_t body1[] = {1};
-    static const uint8_t body2[] = {2, 3};
+    static const uint8_t body1[] = { 1 };
+    static const uint8_t body2[] = { 2, 3 };
     assert(ww_codec_send_request(a, 10, body1, 1, NULL, 0) == 0);
     assert(ww_codec_send_request(a, 20, body2, 2, NULL, 0) == 0);
 
     uint16_t op;
-    uint8_t buf[8];
-    size_t blen;
-    int fds[4];
-    size_t nfds;
+    uint8_t  buf[8];
+    size_t   blen;
+    int      fds[4];
+    size_t   nfds;
 
-    assert(ww_codec_recv_request(b, &op, buf, sizeof(buf), &blen,
-                                 fds, 4, &nfds) == 0);
+    assert(ww_codec_recv_request(b, &op, buf, sizeof(buf), &blen, fds, 4, &nfds) == 0);
     assert(op == 10);
     assert(blen == 1);
     assert(buf[0] == 1);
 
-    assert(ww_codec_recv_request(b, &op, buf, sizeof(buf), &blen,
-                                 fds, 4, &nfds) == 0);
+    assert(ww_codec_recv_request(b, &op, buf, sizeof(buf), &blen, fds, 4, &nfds) == 0);
     assert(op == 20);
     assert(blen == 2);
     assert(buf[0] == 2 && buf[1] == 3);
@@ -158,12 +153,11 @@ static void test_back_to_back(int a, int b) {
 static void test_peer_closed(int a, int b) {
     close(a);
     uint16_t op;
-    uint8_t buf[8];
-    size_t blen;
-    int fds[4];
-    size_t nfds;
-    int rc = ww_codec_recv_request(b, &op, buf, sizeof(buf), &blen,
-                                   fds, 4, &nfds);
+    uint8_t  buf[8];
+    size_t   blen;
+    int      fds[4];
+    size_t   nfds;
+    int      rc = ww_codec_recv_request(b, &op, buf, sizeof(buf), &blen, fds, 4, &nfds);
     assert(rc == -ECONNRESET);
     close(b);
     puts("  ok test_peer_closed");
@@ -175,12 +169,11 @@ static void test_body_too_large(int a, int b) {
     assert(ww_codec_send_request(a, 1, body, sizeof(body), NULL, 0) == 0);
 
     uint16_t op;
-    uint8_t small_buf[16];
-    size_t blen;
-    int fds[4];
-    size_t nfds;
-    int rc = ww_codec_recv_request(b, &op, small_buf, sizeof(small_buf), &blen,
-                                   fds, 4, &nfds);
+    uint8_t  small_buf[16];
+    size_t   blen;
+    int      fds[4];
+    size_t   nfds;
+    int      rc = ww_codec_recv_request(b, &op, small_buf, sizeof(small_buf), &blen, fds, 4, &nfds);
     assert(rc == -EMSGSIZE);
     puts("  ok test_body_too_large");
 }

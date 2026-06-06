@@ -18,16 +18,16 @@
 
 #ifdef WW_HAVE_VULKAN
 
-#include "backend_vulkan.h"
+#    include "backend_vulkan.h"
 
-#include <vulkan/vulkan.h>
+#    include <vulkan/vulkan.h>
 
-#include <stdbool.h>
-#include <stdint.h>
+#    include <stdbool.h>
+#    include <stdint.h>
 
-#ifdef __cplusplus
+#    ifdef __cplusplus
 extern "C" {
-#endif
+#    endif
 
 typedef struct ww_vk_blitter {
     /* Embedded backend, loaded with install_debug_utils=false to avoid
@@ -52,9 +52,9 @@ typedef struct ww_vk_blitter {
 
     /* Resolved lazily on first ensure_shadow_exportable; NULL when the
      * relay path was never used. Required only for DMABUF_RELAY. */
-    PFN_vkGetMemoryFdKHR             vkGetMemoryFdKHR;
-    PFN_vkGetImageSubresourceLayout  vkGetImageSubresourceLayout;
-    PFN_vkGetSemaphoreFdKHR          vkGetSemaphoreFdKHR;
+    PFN_vkGetMemoryFdKHR            vkGetMemoryFdKHR;
+    PFN_vkGetImageSubresourceLayout vkGetImageSubresourceLayout;
+    PFN_vkGetSemaphoreFdKHR         vkGetSemaphoreFdKHR;
 
     VkCommandPool   pool;
     VkCommandBuffer cb;
@@ -67,13 +67,13 @@ typedef struct ww_vk_blitter {
      * DMA_BUF_SYNC_WRITE fence. GSK's later sample submission then
      * sees fresh content via kernel implicit DMA-BUF sync. Matches the
      * exact pattern in gsk/gpu/gskgpudownloadop.c. */
-    VkSemaphore     export_sem;
+    VkSemaphore export_sem;
 
-    VkImage         shadow_image;
-    VkDeviceMemory  shadow_mem;
-    uint32_t        shadow_w;
-    uint32_t        shadow_h;
-    VkFormat        shadow_fmt;
+    VkImage        shadow_image;
+    VkDeviceMemory shadow_mem;
+    uint32_t       shadow_w;
+    uint32_t       shadow_h;
+    VkFormat       shadow_fmt;
     /* false until the first ww_vk_blitter_blit succeeds for this
      * shadow; reset to false on every shadow recreate. The host
      * checks this before exposing the shadow to Qt RHI as a sampled
@@ -98,9 +98,9 @@ typedef struct ww_vk_blitter {
      * that fall back to immediate destroy with a best-effort
      * vkDeviceWaitIdle, which is racy but unlikely. */
     struct {
-        VkImage         image;
-        VkDeviceMemory  memory;
-        int             frames_remaining;
+        VkImage        image;
+        VkDeviceMemory memory;
+        int            frames_remaining;
     } pending_shadow_destroy[4];
     int pending_shadow_destroy_count;
 
@@ -122,24 +122,19 @@ typedef struct ww_vk_blitter {
  * left zeroed). `host_get_proc` is the same callback shape backend_vulkan
  * uses; pass NULL to fall back to dlopen("libvulkan.so.1").
  */
-int  ww_vk_blitter_init(ww_vk_blitter_t *b,
-                        VkInstance instance,
-                        VkPhysicalDevice physical_device,
-                        VkDevice device,
-                        uint32_t queue_family_index,
-                        VkQueue queue,
-                        ww_vk_get_instance_proc_addr_fn host_get_proc);
+int ww_vk_blitter_init(ww_vk_blitter_t* b, VkInstance instance, VkPhysicalDevice physical_device,
+                       VkDevice device, uint32_t queue_family_index, VkQueue queue,
+                       ww_vk_get_instance_proc_addr_fn host_get_proc);
 
 /* Idempotent, safe to call on a zero-initialized struct. */
-void ww_vk_blitter_shutdown(ww_vk_blitter_t *b);
+void ww_vk_blitter_shutdown(ww_vk_blitter_t* b);
 
 /*
  * (Re-)create the shadow image when (w, h, fmt) differ from the
  * current one. No-op when they match. Returns 0 on success, negative
  * errno on failure.
  */
-int  ww_vk_blitter_ensure_shadow(ww_vk_blitter_t *b,
-                                 uint32_t w, uint32_t h, VkFormat fmt);
+int ww_vk_blitter_ensure_shadow(ww_vk_blitter_t* b, uint32_t w, uint32_t h, VkFormat fmt);
 
 /*
  * Allocate (or reallocate) a LINEAR-tiled, externally-exportable shadow
@@ -153,9 +148,8 @@ int  ww_vk_blitter_ensure_shadow(ww_vk_blitter_t *b,
  * Returns 0 on success, -EIO on any Vulkan failure, -ENOSYS when
  * vkGetMemoryFdKHR cannot be resolved on the device.
  */
-int  ww_vk_blitter_ensure_shadow_exportable(ww_vk_blitter_t *b,
-                                            uint32_t w, uint32_t h,
-                                            VkFormat fmt);
+int ww_vk_blitter_ensure_shadow_exportable(ww_vk_blitter_t* b, uint32_t w, uint32_t h,
+                                           VkFormat fmt);
 
 /*
  * Read back the exported DMA-BUF fd + per-plane layout of the current
@@ -169,12 +163,9 @@ int  ww_vk_blitter_ensure_shadow_exportable(ww_vk_blitter_t *b,
  * Returns 0 on success, -EINVAL if no exportable shadow is currently
  * bound.
  */
-int  ww_vk_blitter_get_export(const ww_vk_blitter_t *b,
-                              int *out_fd,
-                              uint32_t *out_n_planes,
-                              uint32_t out_strides[4],
-                              uint64_t out_offsets[4],
-                              uint64_t *out_modifier);
+int ww_vk_blitter_get_export(const ww_vk_blitter_t* b, int* out_fd, uint32_t* out_n_planes,
+                             uint32_t out_strides[4], uint64_t out_offsets[4],
+                             uint64_t* out_modifier);
 
 /*
  * Copy `imported` (UNDEFINED layout, TRANSFER_SRC contents valid) into
@@ -187,29 +178,26 @@ int  ww_vk_blitter_get_export(const ww_vk_blitter_t *b,
  *
  * Returns 0 on success, negative errno on failure.
  */
-int  ww_vk_blitter_blit(ww_vk_blitter_t *b,
-                        VkImage imported,
-                        uint32_t w, uint32_t h,
-                        VkSemaphore acquire_sem,
-                        int release_syncobj_fd);
+int ww_vk_blitter_blit(ww_vk_blitter_t* b, VkImage imported, uint32_t w, uint32_t h,
+                       VkSemaphore acquire_sem, int release_syncobj_fd);
 
-static inline VkImage ww_vk_blitter_shadow(const ww_vk_blitter_t *b) {
+static inline VkImage ww_vk_blitter_shadow(const ww_vk_blitter_t* b) {
     return b ? b->shadow_image : VK_NULL_HANDLE;
 }
 
-static inline VkImageLayout ww_vk_blitter_shadow_layout(const ww_vk_blitter_t *b) {
+static inline VkImageLayout ww_vk_blitter_shadow_layout(const ww_vk_blitter_t* b) {
     (void)b;
     return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 }
 
-static inline bool ww_vk_blitter_initialized(const ww_vk_blitter_t *b) {
+static inline bool ww_vk_blitter_initialized(const ww_vk_blitter_t* b) {
     return b && b->initialized;
 }
 
 /* True once at least one blit has populated the current shadow. The
  * host MUST gate any sampling of the shadow on this — see the comment
  * on `shadow_has_content` for the failure mode if it doesn't. */
-static inline bool ww_vk_blitter_shadow_has_content(const ww_vk_blitter_t *b) {
+static inline bool ww_vk_blitter_shadow_has_content(const ww_vk_blitter_t* b) {
     return b && b->shadow_has_content;
 }
 
@@ -220,11 +208,11 @@ static inline bool ww_vk_blitter_shadow_has_content(const ww_vk_blitter_t *b) {
  * AFTER any Qt RHI frame boundary that would have processed its
  * own release queue — i.e. one frame after `ensure_shadow` queued
  * the old shadow. */
-void ww_vk_blitter_tick_pending_destroys(ww_vk_blitter_t *b);
+void ww_vk_blitter_tick_pending_destroys(ww_vk_blitter_t* b);
 
-#ifdef __cplusplus
+#    ifdef __cplusplus
 } /* extern "C" */
-#endif
+#    endif
 
 #endif /* WW_HAVE_VULKAN */
 #endif /* WAYWALLEN_DISPLAY_BACKEND_VULKAN_BLIT_H */

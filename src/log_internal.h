@@ -12,8 +12,8 @@
 extern "C" {
 #endif
 
-__attribute__((format(printf, 2, 3), visibility("hidden")))
-void ww_log(waywallen_log_level_t level, const char *fmt, ...);
+__attribute__((format(printf, 2, 3), visibility("hidden"))) void ww_log(waywallen_log_level_t level,
+                                                                        const char* fmt, ...);
 
 #ifdef __cplusplus
 }

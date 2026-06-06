@@ -2,7 +2,7 @@
  * Wire codec implementation. See codec.h for the contract.
  */
 
-#define _GNU_SOURCE  /* MSG_CMSG_CLOEXEC */
+#define _GNU_SOURCE /* MSG_CMSG_CLOEXEC */
 
 #include "codec.h"
 
@@ -21,23 +21,21 @@
 /* Fall back: POSIX doesn't have MSG_CMSG_CLOEXEC. Receiving fds
  * without it is subject to a theoretical fork/exec race, but the
  * library only runs on Linux in practice. */
-#define MSG_CMSG_CLOEXEC 0
+#    define MSG_CMSG_CLOEXEC 0
 #endif
 
 /* ------------------------------------------------------------------ */
 /*  Send path                                                          */
 /* ------------------------------------------------------------------ */
 
-static int do_send(int fd,
-                   uint16_t op,
-                   const uint8_t *body, size_t body_len,
-                   const int *fds, size_t n_fds) {
+static int do_send(int fd, uint16_t op, const uint8_t* body, size_t body_len, const int* fds,
+                   size_t n_fds) {
     if (fd < 0) return -EBADF;
     if (body_len > WW_CODEC_MAX_BODY_BYTES) return -EMSGSIZE;
     if (n_fds > WW_CODEC_MAX_FDS_PER_MSG) return -EMSGSIZE;
-    if (n_fds > 0 && !fds) return -EINVAL;
+    if (n_fds > 0 && ! fds) return -EINVAL;
 
-    size_t total = 4u + body_len;
+    size_t  total = 4u + body_len;
     uint8_t hdr[4];
     hdr[0] = (uint8_t)(op & 0xff);
     hdr[1] = (uint8_t)((op >> 8) & 0xff);
@@ -46,35 +44,35 @@ static int do_send(int fd,
 
     struct iovec iov[2];
     iov[0].iov_base = hdr;
-    iov[0].iov_len = 4;
-    int iovcnt = 1;
+    iov[0].iov_len  = 4;
+    int iovcnt      = 1;
     if (body_len > 0) {
         /* sendmsg wants a non-const pointer; cast away const — the
          * kernel never writes to msg_iov buffers. */
-        iov[1].iov_base = (void *)(uintptr_t)body;
-        iov[1].iov_len = body_len;
-        iovcnt = 2;
+        iov[1].iov_base = (void*)(uintptr_t)body;
+        iov[1].iov_len  = body_len;
+        iovcnt          = 2;
     }
 
     /* cmsg buffer sized for MAX_FDS; actual used length is smaller. */
     union {
-        char raw[WW_CMSG_SPACE];
+        char           raw[WW_CMSG_SPACE];
         struct cmsghdr align;
     } cmsg_store;
     memset(&cmsg_store, 0, sizeof(cmsg_store));
 
     struct msghdr msg;
     memset(&msg, 0, sizeof(msg));
-    msg.msg_iov = iov;
+    msg.msg_iov    = iov;
     msg.msg_iovlen = (size_t)iovcnt;
 
     if (n_fds > 0) {
-        msg.msg_control = cmsg_store.raw;
+        msg.msg_control    = cmsg_store.raw;
         msg.msg_controllen = (socklen_t)CMSG_SPACE(sizeof(int) * n_fds);
-        struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
-        c->cmsg_level = SOL_SOCKET;
-        c->cmsg_type = SCM_RIGHTS;
-        c->cmsg_len = (socklen_t)CMSG_LEN(sizeof(int) * n_fds);
+        struct cmsghdr* c  = CMSG_FIRSTHDR(&msg);
+        c->cmsg_level      = SOL_SOCKET;
+        c->cmsg_type       = SCM_RIGHTS;
+        c->cmsg_len        = (socklen_t)CMSG_LEN(sizeof(int) * n_fds);
         memcpy(CMSG_DATA(c), fds, sizeof(int) * n_fds);
     }
 
@@ -96,15 +94,13 @@ static int do_send(int fd,
     }
 }
 
-int ww_codec_send_request(int fd, uint16_t op,
-                          const uint8_t *body, size_t body_len,
-                          const int *fds, size_t n_fds) {
+int ww_codec_send_request(int fd, uint16_t op, const uint8_t* body, size_t body_len, const int* fds,
+                          size_t n_fds) {
     return do_send(fd, op, body, body_len, fds, n_fds);
 }
 
-int ww_codec_send_event(int fd, uint16_t op,
-                        const uint8_t *body, size_t body_len,
-                        const int *fds, size_t n_fds) {
+int ww_codec_send_event(int fd, uint16_t op, const uint8_t* body, size_t body_len, const int* fds,
+                        size_t n_fds) {
     return do_send(fd, op, body, body_len, fds, n_fds);
 }
 
@@ -112,7 +108,7 @@ int ww_codec_send_event(int fd, uint16_t op,
 /*  Receive path                                                       */
 /* ------------------------------------------------------------------ */
 
-static void close_all(int *fds, size_t n) {
+static void close_all(int* fds, size_t n) {
     for (size_t i = 0; i < n; i++) {
         if (fds[i] >= 0) close(fds[i]);
     }
@@ -120,8 +116,8 @@ static void close_all(int *fds, size_t n) {
 
 /* Blocking read(2) that fills the whole buffer, handling short reads
  * and EINTR. Returns 0 on success, -errno on failure. */
-static int read_exact(int fd, void *buf, size_t want) {
-    uint8_t *p = (uint8_t *)buf;
+static int read_exact(int fd, void* buf, size_t want) {
+    uint8_t* p = (uint8_t*)buf;
     while (want > 0) {
         ssize_t n = read(fd, p, want);
         if (n == 0) return -ECONNRESET;
@@ -135,21 +131,19 @@ static int read_exact(int fd, void *buf, size_t want) {
     return 0;
 }
 
-static int do_recv(int fd,
-                   uint16_t *op_out,
-                   uint8_t *body_buf, size_t body_cap, size_t *body_len_out,
-                   int *fd_buf, size_t fd_cap, size_t *n_fds_out) {
+static int do_recv(int fd, uint16_t* op_out, uint8_t* body_buf, size_t body_cap,
+                   size_t* body_len_out, int* fd_buf, size_t fd_cap, size_t* n_fds_out) {
     if (fd < 0) return -EBADF;
-    if (!op_out || !body_len_out || !n_fds_out) return -EINVAL;
-    if (body_cap > 0 && !body_buf) return -EINVAL;
-    if (fd_cap > 0 && !fd_buf) return -EINVAL;
+    if (! op_out || ! body_len_out || ! n_fds_out) return -EINVAL;
+    if (body_cap > 0 && ! body_buf) return -EINVAL;
+    if (fd_cap > 0 && ! fd_buf) return -EINVAL;
 
     *body_len_out = 0;
-    *n_fds_out = 0;
+    *n_fds_out    = 0;
 
     uint8_t hdr[4];
-    size_t hdr_filled = 0;
-    size_t received_fds = 0;
+    size_t  hdr_filled   = 0;
+    size_t  received_fds = 0;
 
     /* Read the 4-byte header via recvmsg, harvesting any SCM_RIGHTS
      * ancillary data that rode the first byte of the frame. SOCK_STREAM
@@ -157,19 +151,19 @@ static int do_recv(int fd,
     while (hdr_filled < 4) {
         struct iovec iov;
         iov.iov_base = hdr + hdr_filled;
-        iov.iov_len = 4 - hdr_filled;
+        iov.iov_len  = 4 - hdr_filled;
 
         union {
-            char raw[WW_CMSG_SPACE];
+            char           raw[WW_CMSG_SPACE];
             struct cmsghdr align;
         } cmsg_store;
         memset(&cmsg_store, 0, sizeof(cmsg_store));
 
         struct msghdr msg;
         memset(&msg, 0, sizeof(msg));
-        msg.msg_iov = &iov;
-        msg.msg_iovlen = 1;
-        msg.msg_control = cmsg_store.raw;
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = cmsg_store.raw;
         msg.msg_controllen = (socklen_t)sizeof(cmsg_store.raw);
 
         ssize_t n = recvmsg(fd, &msg, MSG_CMSG_CLOEXEC);
@@ -183,13 +177,11 @@ static int do_recv(int fd,
          * may attach cmsg to zero-byte recvmsg calls in rare edge
          * cases, but more importantly we want to drain them exactly
          * once regardless of whether the payload arrived. */
-        for (struct cmsghdr *c = CMSG_FIRSTHDR(&msg); c != NULL;
-             c = CMSG_NXTHDR(&msg, c)) {
+        for (struct cmsghdr* c = CMSG_FIRSTHDR(&msg); c != NULL; c = CMSG_NXTHDR(&msg, c)) {
             if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
-                size_t payload_len =
-                    (size_t)c->cmsg_len - (size_t)CMSG_LEN(0);
-                size_t nh = payload_len / sizeof(int);
-                const unsigned char *src = (const unsigned char *)CMSG_DATA(c);
+                size_t               payload_len = (size_t)c->cmsg_len - (size_t)CMSG_LEN(0);
+                size_t               nh          = payload_len / sizeof(int);
+                const unsigned char* src         = (const unsigned char*)CMSG_DATA(c);
                 for (size_t i = 0; i < nh; i++) {
                     int got;
                     memcpy(&got, src + i * sizeof(int), sizeof(int));
@@ -219,7 +211,7 @@ static int do_recv(int fd,
         hdr_filled += (size_t)n;
     }
 
-    uint16_t op = (uint16_t)((uint32_t)hdr[0] | ((uint32_t)hdr[1] << 8));
+    uint16_t op    = (uint16_t)((uint32_t)hdr[0] | ((uint32_t)hdr[1] << 8));
     uint16_t total = (uint16_t)((uint32_t)hdr[2] | ((uint32_t)hdr[3] << 8));
     if (total < 4) {
         close_all(fd_buf, received_fds);
@@ -239,21 +231,19 @@ static int do_recv(int fd,
         }
     }
 
-    *op_out = op;
+    *op_out       = op;
     *body_len_out = body_len;
-    *n_fds_out = received_fds;
+    *n_fds_out    = received_fds;
     return 0;
 }
 
-int ww_codec_recv_request(int fd, uint16_t *op,
-                          uint8_t *body_buf, size_t body_cap, size_t *body_len,
-                          int *fd_buf, size_t fd_cap, size_t *n_fds) {
+int ww_codec_recv_request(int fd, uint16_t* op, uint8_t* body_buf, size_t body_cap,
+                          size_t* body_len, int* fd_buf, size_t fd_cap, size_t* n_fds) {
     return do_recv(fd, op, body_buf, body_cap, body_len, fd_buf, fd_cap, n_fds);
 }
 
-int ww_codec_recv_event(int fd, uint16_t *op,
-                        uint8_t *body_buf, size_t body_cap, size_t *body_len,
-                        int *fd_buf, size_t fd_cap, size_t *n_fds) {
+int ww_codec_recv_event(int fd, uint16_t* op, uint8_t* body_buf, size_t body_cap, size_t* body_len,
+                        int* fd_buf, size_t fd_cap, size_t* n_fds) {
     return do_recv(fd, op, body_buf, body_cap, body_len, fd_buf, fd_cap, n_fds);
 }
 
@@ -261,21 +251,21 @@ int ww_codec_recv_event(int fd, uint16_t *op,
 /*  Non-blocking partial-frame primitives                              */
 /* ------------------------------------------------------------------ */
 
-void ww_codec_recv_state_init(ww_codec_recv_state_t *st) {
+void ww_codec_recv_state_init(ww_codec_recv_state_t* st) {
     memset(st, 0, sizeof(*st));
     for (size_t i = 0; i < WW_CODEC_MAX_FDS_PER_MSG; i++) st->fds[i] = -1;
 }
 
-void ww_codec_recv_state_reset(ww_codec_recv_state_t *st) {
+void ww_codec_recv_state_reset(ww_codec_recv_state_t* st) {
     /* Close any unclaimed fds — caller owns harvested fds only after it
      * explicitly copies them out before reset. */
     close_all(st->fds, st->n_fds);
     ww_codec_recv_state_init(st);
 }
 
-int ww_codec_recv_partial(int fd, ww_codec_recv_state_t *st) {
+int ww_codec_recv_partial(int fd, ww_codec_recv_state_t* st) {
     if (fd < 0) return -EBADF;
-    if (!st)    return -EINVAL;
+    if (! st) return -EINVAL;
 
     /* Header read. SCM_RIGHTS rides the first byte of the frame per
      * the kernel's UDS contract; we harvest cmsg on every recvmsg
@@ -286,17 +276,17 @@ int ww_codec_recv_partial(int fd, ww_codec_recv_state_t *st) {
         iov.iov_len  = 4 - st->hdr_filled;
 
         union {
-            char raw[WW_CMSG_SPACE];
+            char           raw[WW_CMSG_SPACE];
             struct cmsghdr align;
         } cmsg_store;
         memset(&cmsg_store, 0, sizeof(cmsg_store));
 
         struct msghdr msg;
         memset(&msg, 0, sizeof(msg));
-        msg.msg_iov         = &iov;
-        msg.msg_iovlen      = 1;
-        msg.msg_control     = cmsg_store.raw;
-        msg.msg_controllen  = (socklen_t)sizeof(cmsg_store.raw);
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = cmsg_store.raw;
+        msg.msg_controllen = (socklen_t)sizeof(cmsg_store.raw);
 
         ssize_t n = recvmsg(fd, &msg, MSG_CMSG_CLOEXEC | MSG_DONTWAIT);
         if (n < 0) {
@@ -305,13 +295,11 @@ int ww_codec_recv_partial(int fd, ww_codec_recv_state_t *st) {
             return -errno;
         }
 
-        for (struct cmsghdr *c = CMSG_FIRSTHDR(&msg); c != NULL;
-             c = CMSG_NXTHDR(&msg, c)) {
+        for (struct cmsghdr* c = CMSG_FIRSTHDR(&msg); c != NULL; c = CMSG_NXTHDR(&msg, c)) {
             if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
-                size_t payload_len =
-                    (size_t)c->cmsg_len - (size_t)CMSG_LEN(0);
-                size_t nh = payload_len / sizeof(int);
-                const unsigned char *src = (const unsigned char *)CMSG_DATA(c);
+                size_t               payload_len = (size_t)c->cmsg_len - (size_t)CMSG_LEN(0);
+                size_t               nh          = payload_len / sizeof(int);
+                const unsigned char* src         = (const unsigned char*)CMSG_DATA(c);
                 for (size_t i = 0; i < nh; i++) {
                     int got;
                     memcpy(&got, src + i * sizeof(int), sizeof(int));
@@ -340,7 +328,7 @@ int ww_codec_recv_partial(int fd, ww_codec_recv_state_t *st) {
 
     /* Header complete — (re-)parse op + body_len. Idempotent so it's
      * safe to recompute on each entry. */
-    st->op = (uint16_t)(st->hdr[0] | ((uint16_t)st->hdr[1] << 8));
+    st->op       = (uint16_t)(st->hdr[0] | ((uint16_t)st->hdr[1] << 8));
     size_t total = (size_t)st->hdr[2] | ((size_t)st->hdr[3] << 8);
     if (total < 4) {
         ww_codec_recv_state_reset(st);
@@ -355,8 +343,8 @@ int ww_codec_recv_partial(int fd, ww_codec_recv_state_t *st) {
     /* Body read. fds were already drained from the header recvmsg
      * above; plain recv suffices here. */
     while (st->body_filled < st->body_len) {
-        ssize_t n = recv(fd, st->body + st->body_filled,
-                         st->body_len - st->body_filled, MSG_DONTWAIT);
+        ssize_t n =
+            recv(fd, st->body + st->body_filled, st->body_len - st->body_filled, MSG_DONTWAIT);
         if (n < 0) {
             if (errno == EINTR) continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) return WW_CODEC_FRAME_NEED;
@@ -372,9 +360,9 @@ int ww_codec_recv_partial(int fd, ww_codec_recv_state_t *st) {
     return WW_CODEC_FRAME_DONE;
 }
 
-ssize_t ww_codec_send_partial(int fd, const uint8_t *buf, size_t len) {
+ssize_t ww_codec_send_partial(int fd, const uint8_t* buf, size_t len) {
     if (fd < 0) return -EBADF;
-    if (len > 0 && !buf) return -EINVAL;
+    if (len > 0 && ! buf) return -EINVAL;
     if (len == 0) return 0;
     for (;;) {
         ssize_t n = send(fd, buf, len, MSG_NOSIGNAL | MSG_DONTWAIT);

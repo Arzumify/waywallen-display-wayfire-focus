@@ -72,15 +72,16 @@ waywallen_display_version_t waywallen_display_version(void);
  * Return codes
  * ------------------------------------------------------------------------- */
 
-typedef enum waywallen_err {
-    WAYWALLEN_OK = 0,
-    WAYWALLEN_ERR_INVAL = -1,       /* bad argument */
-    WAYWALLEN_ERR_NOMEM = -2,       /* allocation failed */
-    WAYWALLEN_ERR_STATE = -3,       /* called in wrong state */
-    WAYWALLEN_ERR_IO = -4,          /* socket / syscall error */
-    WAYWALLEN_ERR_PROTO = -5,       /* wire format / state machine violation */
-    WAYWALLEN_ERR_NOTCONN = -6,     /* not connected */
-    WAYWALLEN_ERR_NOT_IMPL = -7,    /* feature not implemented */
+typedef enum waywallen_err
+{
+    WAYWALLEN_OK           = 0,
+    WAYWALLEN_ERR_INVAL    = -1, /* bad argument */
+    WAYWALLEN_ERR_NOMEM    = -2, /* allocation failed */
+    WAYWALLEN_ERR_STATE    = -3, /* called in wrong state */
+    WAYWALLEN_ERR_IO       = -4, /* socket / syscall error */
+    WAYWALLEN_ERR_PROTO    = -5, /* wire format / state machine violation */
+    WAYWALLEN_ERR_NOTCONN  = -6, /* not connected */
+    WAYWALLEN_ERR_NOT_IMPL = -7, /* feature not implemented */
 } waywallen_err_t;
 
 /* -------------------------------------------------------------------------
@@ -97,19 +98,18 @@ typedef struct waywallen_display waywallen_display_t;
  * QLoggingCategory, syslog, etc.).
  * ------------------------------------------------------------------------- */
 
-typedef enum waywallen_log_level {
+typedef enum waywallen_log_level
+{
     WAYWALLEN_LOG_DEBUG = 0,
     WAYWALLEN_LOG_INFO  = 1,
     WAYWALLEN_LOG_WARN  = 2,
     WAYWALLEN_LOG_ERROR = 3,
 } waywallen_log_level_t;
 
-typedef void (*waywallen_log_callback_t)(waywallen_log_level_t level,
-                                         const char *msg,
-                                         void *user_data);
+typedef void (*waywallen_log_callback_t)(waywallen_log_level_t level, const char* msg,
+                                         void* user_data);
 
-void waywallen_display_set_log_callback(waywallen_log_callback_t cb,
-                                        void *user_data);
+void waywallen_display_set_log_callback(waywallen_log_callback_t cb, void* user_data);
 
 /* -------------------------------------------------------------------------
  * Connection + stream state
@@ -123,14 +123,16 @@ void waywallen_display_set_log_callback(waywallen_log_callback_t cb,
  * me frames?"
  * ------------------------------------------------------------------------- */
 
-typedef enum waywallen_conn_state {
+typedef enum waywallen_conn_state
+{
     WAYWALLEN_CONN_DISCONNECTED = 0,
     WAYWALLEN_CONN_CONNECTING,
     WAYWALLEN_CONN_CONNECTED,
     WAYWALLEN_CONN_DEAD,
 } waywallen_conn_state_t;
 
-typedef enum waywallen_stream_state {
+typedef enum waywallen_stream_state
+{
     WAYWALLEN_STREAM_INACTIVE = 0,
     WAYWALLEN_STREAM_ACTIVE,
 } waywallen_stream_state_t;
@@ -141,7 +143,8 @@ typedef enum waywallen_stream_state {
  * Hosts that just want a one-shot connect should use the legacy
  * waywallen_display_connect() (which wraps this internally).
  */
-typedef enum waywallen_handshake_state {
+typedef enum waywallen_handshake_state
+{
     WAYWALLEN_HS_IDLE          = 0, /* before begin_connect / after disconnect */
     WAYWALLEN_HS_CONNECTING    = 1, /* connect(2) returned EINPROGRESS         */
     WAYWALLEN_HS_HELLO_PENDING = 2, /* hello queued, partial sendmsg           */
@@ -153,18 +156,19 @@ typedef enum waywallen_handshake_state {
 
 /* Return codes from waywallen_display_advance_handshake(). Negative
  * values are propagated waywallen_err_t / -errno. */
-#define WAYWALLEN_HS_DONE       1   /* state transitioned to READY        */
-#define WAYWALLEN_HS_NEED_READ  2   /* arm POLLIN, call again on readable */
-#define WAYWALLEN_HS_NEED_WRITE 3   /* arm POLLOUT, call again on writable*/
-#define WAYWALLEN_HS_PROGRESS   4   /* state advanced, more I/O needed    */
+#define WAYWALLEN_HS_DONE       1 /* state transitioned to READY        */
+#define WAYWALLEN_HS_NEED_READ  2 /* arm POLLIN, call again on readable */
+#define WAYWALLEN_HS_NEED_WRITE 3 /* arm POLLOUT, call again on writable*/
+#define WAYWALLEN_HS_PROGRESS   4 /* state advanced, more I/O needed    */
 
 /* -------------------------------------------------------------------------
  * Backends
  * ------------------------------------------------------------------------- */
 
-typedef enum waywallen_backend {
-    WAYWALLEN_BACKEND_NONE = 0,
-    WAYWALLEN_BACKEND_EGL = 1,
+typedef enum waywallen_backend
+{
+    WAYWALLEN_BACKEND_NONE   = 0,
+    WAYWALLEN_BACKEND_EGL    = 1,
     WAYWALLEN_BACKEND_VULKAN = 2,
     /* Library owns a private Vulkan instance/device, imports the
      * producer DMA-BUF, blits into a LINEAR shadow image whose
@@ -176,19 +180,19 @@ typedef enum waywallen_backend {
 } waywallen_backend_t;
 
 typedef struct waywallen_egl_ctx {
-    void *egl_display;                        /* EGLDisplay */
-    void *(*get_proc_address)(const char *);  /* may be NULL */
+    void* egl_display;                      /* EGLDisplay */
+    void* (*get_proc_address)(const char*); /* may be NULL */
 } waywallen_egl_ctx_t;
 
 typedef struct waywallen_vk_ctx {
-    void *instance;                           /* VkInstance */
-    void *physical_device;                    /* VkPhysicalDevice */
-    void *device;                             /* VkDevice */
+    void*    instance;        /* VkInstance */
+    void*    physical_device; /* VkPhysicalDevice */
+    void*    device;          /* VkDevice */
     uint32_t queue_family_index;
     /* PFN_vkGetInstanceProcAddr. May be NULL — the backend will then
      * dlopen("libvulkan.so.1") and resolve vkGetInstanceProcAddr from
      * there. The library never links libvulkan.so directly. */
-    void *(*vk_get_instance_proc_addr)(void *instance, const char *name);
+    void* (*vk_get_instance_proc_addr)(void* instance, const char* name);
 } waywallen_vk_ctx_t;
 
 /* -------------------------------------------------------------------------
@@ -217,11 +221,11 @@ typedef struct waywallen_textures {
 
     waywallen_backend_t backend;
     /* Only one set of handles is non-NULL, depending on `backend`. */
-    void **egl_images;           /* length == count; each is an EGLImageKHR (EGL) */
-    uint32_t *gl_textures;       /* length == count; created by host via
-                                  * waywallen_display_create_gl_texture (EGL) */
-    void **vk_images;            /* length == count; each is a VkImage (Vulkan) */
-    void **vk_memories;          /* length == count; each is a VkDeviceMemory (Vulkan) */
+    void**    egl_images;  /* length == count; each is an EGLImageKHR (EGL) */
+    uint32_t* gl_textures; /* length == count; created by host via
+                            * waywallen_display_create_gl_texture (EGL) */
+    void** vk_images;      /* length == count; each is a VkImage (Vulkan) */
+    void** vk_memories;    /* length == count; each is a VkDeviceMemory (Vulkan) */
 
     /* DMABUF_RELAY only — the library owns a single shadow VkImage
      * shared across all `count` producer buffers; each frame is blit
@@ -242,10 +246,10 @@ typedef struct waywallen_textures {
 } waywallen_textures_t;
 
 typedef struct waywallen_config {
-    waywallen_rect_t source_rect;   /* in texture pixels */
-    waywallen_rect_t dest_rect;     /* in display pixels */
-    uint32_t transform;             /* wl_output.transform bits */
-    float clear_color[4];           /* RGBA straight alpha */
+    waywallen_rect_t source_rect;    /* in texture pixels */
+    waywallen_rect_t dest_rect;      /* in display pixels */
+    uint32_t         transform;      /* wl_output.transform bits */
+    float            clear_color[4]; /* RGBA straight alpha */
 } waywallen_config_t;
 
 typedef struct waywallen_frame {
@@ -255,7 +259,7 @@ typedef struct waywallen_frame {
      * could not import (e.g. EGL backend, or VK import failed); the
      * acquire sync_fd was closed in that case. The host must attach
      * this to its next `VkQueueSubmit`'s wait list. */
-    void *vk_acquire_semaphore;
+    void* vk_acquire_semaphore;
     /* Raw drm_syncobj fd (binary, unsignaled). Ownership transfers
      * to the host: the host MUST signal it from its release GPU work
      * (typically via `vkImportSemaphoreFdKHR(OPAQUE_FD)` on a binary
@@ -275,25 +279,19 @@ typedef struct waywallen_frame {
  * ------------------------------------------------------------------------- */
 
 typedef struct waywallen_display_callbacks {
-    void (*on_textures_ready)(void *user_data,
-                              const waywallen_textures_t *textures);
-    void (*on_textures_releasing)(void *user_data,
-                                  const waywallen_textures_t *textures);
-    void (*on_config)(void *user_data,
-                      const waywallen_config_t *config);
-    void (*on_frame_ready)(void *user_data,
-                           const waywallen_frame_t *frame);
-    void (*on_disconnected)(void *user_data,
-                            int err_code,
-                            const char *message);
-    void *user_data;
+    void (*on_textures_ready)(void* user_data, const waywallen_textures_t* textures);
+    void (*on_textures_releasing)(void* user_data, const waywallen_textures_t* textures);
+    void (*on_config)(void* user_data, const waywallen_config_t* config);
+    void (*on_frame_ready)(void* user_data, const waywallen_frame_t* frame);
+    void (*on_disconnected)(void* user_data, int err_code, const char* message);
+    void* user_data;
 } waywallen_display_callbacks_t;
 
 /* -------------------------------------------------------------------------
  * Lifecycle
  * ------------------------------------------------------------------------- */
 
-waywallen_display_t *waywallen_display_new(const waywallen_display_callbacks_t *cb);
+waywallen_display_t* waywallen_display_new(const waywallen_display_callbacks_t* cb);
 
 /*
  * Shutdown sequence: close → drain → free. See
@@ -318,9 +316,9 @@ waywallen_display_t *waywallen_display_new(const waywallen_display_callbacks_t *
  *     that nobody will ever destroy silently corrupts GPU memory
  *     tracking, so we'd rather crash loudly.
  */
-void                 waywallen_display_close(waywallen_display_t *d);
-int                  waywallen_display_drain(waywallen_display_t *d);
-void                 waywallen_display_free(waywallen_display_t *d);
+void waywallen_display_close(waywallen_display_t* d);
+int  waywallen_display_drain(waywallen_display_t* d);
+void waywallen_display_free(waywallen_display_t* d);
 
 /*
  * Convenience: same-thread shutdown. Equivalent to
@@ -330,16 +328,14 @@ void                 waywallen_display_free(waywallen_display_t *d);
  * current. Aborts if drain doesn't complete in 4 iterations
  * (catastrophic GPU state — caller has bigger problems than a leak).
  */
-void                 waywallen_display_shutdown(waywallen_display_t *d);
+void waywallen_display_shutdown(waywallen_display_t* d);
 
 /* -------------------------------------------------------------------------
  * Backend binding (must be called before `connect`)
  * ------------------------------------------------------------------------- */
 
-int waywallen_display_bind_egl(waywallen_display_t *d,
-                               const waywallen_egl_ctx_t *ctx);
-int waywallen_display_bind_vulkan(waywallen_display_t *d,
-                                  const waywallen_vk_ctx_t *ctx);
+int waywallen_display_bind_egl(waywallen_display_t* d, const waywallen_egl_ctx_t* ctx);
+int waywallen_display_bind_vulkan(waywallen_display_t* d, const waywallen_vk_ctx_t* ctx);
 
 /*
  * Library creates+owns a private Vulkan instance/device/queue,
@@ -360,7 +356,7 @@ int waywallen_display_bind_vulkan(waywallen_display_t *d,
  * (shadow_dmabuf_fd and friends). The {egl,vk}_images arrays stay
  * NULL — the producer buffers are library-internal in this mode.
  */
-int waywallen_display_bind_dmabuf_relay(waywallen_display_t *d);
+int waywallen_display_bind_dmabuf_relay(waywallen_display_t* d);
 
 /*
  * Override the DRM render-node id reported during register_display.
@@ -376,9 +372,7 @@ int waywallen_display_bind_dmabuf_relay(waywallen_display_t *d);
  *
  * Must be called before `begin_connect` / `connect`.
  */
-int waywallen_display_set_drm_render_node(waywallen_display_t *d,
-                                          uint32_t major,
-                                          uint32_t minor);
+int waywallen_display_set_drm_render_node(waywallen_display_t* d, uint32_t major, uint32_t minor);
 
 /* -------------------------------------------------------------------------
  * Async session (event-loop friendly)
@@ -411,17 +405,13 @@ int waywallen_display_set_drm_render_node(waywallen_display_t *d,
  * into per-display settings. Pass NULL or "" if the host has no stable
  * id; the daemon will fall back to indexing settings by display_name.
  */
-int waywallen_display_begin_connect(waywallen_display_t *d,
-                                    const char *socket_path,
-                                    const char *display_name,
-                                    const char *instance_id,
-                                    uint32_t width,
-                                    uint32_t height,
-                                    uint32_t refresh_mhz);
+int waywallen_display_begin_connect(waywallen_display_t* d, const char* socket_path,
+                                    const char* display_name, const char* instance_id,
+                                    uint32_t width, uint32_t height, uint32_t refresh_mhz);
 
-int waywallen_display_advance_handshake(waywallen_display_t *d);
+int waywallen_display_advance_handshake(waywallen_display_t* d);
 
-waywallen_handshake_state_t waywallen_display_handshake_state(waywallen_display_t *d);
+waywallen_handshake_state_t waywallen_display_handshake_state(waywallen_display_t* d);
 
 /* -------------------------------------------------------------------------
  * Session
@@ -436,17 +426,11 @@ waywallen_handshake_state_t waywallen_display_handshake_state(waywallen_display_
  *
  * See `begin_connect` for the meaning of `instance_id`.
  */
-int waywallen_display_connect(waywallen_display_t *d,
-                              const char *socket_path,
-                              const char *display_name,
-                              const char *instance_id,
-                              uint32_t width,
-                              uint32_t height,
-                              uint32_t refresh_mhz);
+int waywallen_display_connect(waywallen_display_t* d, const char* socket_path,
+                              const char* display_name, const char* instance_id, uint32_t width,
+                              uint32_t height, uint32_t refresh_mhz);
 
-int waywallen_display_update_size(waywallen_display_t *d,
-                                  uint32_t width,
-                                  uint32_t height);
+int waywallen_display_update_size(waywallen_display_t* d, uint32_t width, uint32_t height);
 
 /*
  * `flags` bitmask passed to `waywallen_display_set_window_state`.
@@ -472,14 +456,13 @@ int waywallen_display_update_size(waywallen_display_t *d,
  * itself remember the last value across reconnects — the host is
  * expected to re-send after a reconnect if it cares.
  */
-int waywallen_display_set_window_state(waywallen_display_t *d,
-                                       uint32_t flags);
+int waywallen_display_set_window_state(waywallen_display_t* d, uint32_t flags);
 
 /*
  * Read-side fd for poll(2) integration. Returns -1 if the display is
  * not currently connected.
  */
-int waywallen_display_get_fd(waywallen_display_t *d);
+int waywallen_display_get_fd(waywallen_display_t* d);
 
 /*
  * Outbox protocol — drives non-blocking POLLOUT for post-handshake
@@ -496,8 +479,8 @@ int waywallen_display_get_fd(waywallen_display_t *d);
  * fires `on_disconnected`; hosts can treat handle_writable's return
  * the same as dispatch's.
  */
-bool waywallen_display_wants_writable(waywallen_display_t *d);
-int  waywallen_display_handle_writable(waywallen_display_t *d);
+bool waywallen_display_wants_writable(waywallen_display_t* d);
+int  waywallen_display_handle_writable(waywallen_display_t* d);
 
 /*
  * Consume whatever bytes are currently readable on the socket,
@@ -506,7 +489,7 @@ int  waywallen_display_handle_writable(waywallen_display_t *d);
  * (may be 0), or a negative `waywallen_err_t` on failure. On fatal
  * failure `on_disconnected` has already been invoked.
  */
-int waywallen_display_dispatch(waywallen_display_t *d);
+int waywallen_display_dispatch(waywallen_display_t* d);
 
 /*
  * Convenience: SIGNAL the binary drm_syncobj at `fd` and close it.
@@ -547,52 +530,46 @@ int waywallen_display_signal_release_syncobj(int fd);
  * modifier mask (or 0 if the host can't track it).
  * ------------------------------------------------------------------------- */
 
-typedef enum waywallen_button_state {
+typedef enum waywallen_button_state
+{
     WAYWALLEN_BUTTON_RELEASED = 0,
     WAYWALLEN_BUTTON_PRESSED  = 1,
 } waywallen_button_state_t;
 
-typedef enum waywallen_axis_source {
+typedef enum waywallen_axis_source
+{
     WAYWALLEN_AXIS_WHEEL      = 0,
     WAYWALLEN_AXIS_FINGER     = 1,
     WAYWALLEN_AXIS_CONTINUOUS = 2,
 } waywallen_axis_source_t;
 
-int waywallen_display_send_pointer_motion(waywallen_display_t *d,
-                                          float x, float y,
-                                          uint64_t timestamp_us,
-                                          uint32_t modifiers);
+int waywallen_display_send_pointer_motion(waywallen_display_t* d, float x, float y,
+                                          uint64_t timestamp_us, uint32_t modifiers);
 
 /* `button` is a Linux input event code: BTN_LEFT=0x110, BTN_RIGHT=0x111,
  * BTN_MIDDLE=0x112, BTN_SIDE=0x113, BTN_EXTRA=0x114. */
-int waywallen_display_send_pointer_button(waywallen_display_t *d,
-                                          float x, float y,
-                                          uint32_t button,
-                                          waywallen_button_state_t state,
-                                          uint64_t timestamp_us,
+int waywallen_display_send_pointer_button(waywallen_display_t* d, float x, float y, uint32_t button,
+                                          waywallen_button_state_t state, uint64_t timestamp_us,
                                           uint32_t modifiers);
 
 /* Deltas are in logical notches (Qt's 120-per-notch / 120; Wayland's
  * wl_pointer.axis units / 10 for wheel). Diagonal scroll fits in one
  * call. */
-int waywallen_display_send_pointer_axis(waywallen_display_t *d,
-                                        float x, float y,
-                                        float delta_x, float delta_y,
-                                        waywallen_axis_source_t source,
-                                        uint64_t timestamp_us,
-                                        uint32_t modifiers);
+int waywallen_display_send_pointer_axis(waywallen_display_t* d, float x, float y, float delta_x,
+                                        float delta_y, waywallen_axis_source_t source,
+                                        uint64_t timestamp_us, uint32_t modifiers);
 
 /* -------------------------------------------------------------------------
  * State queries
  * ------------------------------------------------------------------------- */
 
-waywallen_conn_state_t   waywallen_display_conn_state(waywallen_display_t *d);
-waywallen_stream_state_t waywallen_display_stream_state(waywallen_display_t *d);
+waywallen_conn_state_t   waywallen_display_conn_state(waywallen_display_t* d);
+waywallen_stream_state_t waywallen_display_stream_state(waywallen_display_t* d);
 
 /* Daemon-assigned display id from `display_accepted`. 0 before the
  * handshake completes or after disconnect. Intended for logs / debug
  * overlays — opaque to the protocol. */
-uint64_t waywallen_display_get_display_id(waywallen_display_t *d);
+uint64_t waywallen_display_get_display_id(waywallen_display_t* d);
 
 /* -------------------------------------------------------------------------
  * Last disconnect reason
@@ -613,35 +590,34 @@ uint64_t waywallen_display_get_display_id(waywallen_display_t *d);
  *     across reconnect attempts and only hide it once we're healthy.
  * ------------------------------------------------------------------------- */
 
-typedef enum waywallen_disconnect_reason {
-    WAYWALLEN_DISCONNECT_NONE                 = 0,
+typedef enum waywallen_disconnect_reason
+{
+    WAYWALLEN_DISCONNECT_NONE = 0,
     /* daemon `error.code == 2`: hello.client_protocol_version is
      * outside the daemon's supported range. */
-    WAYWALLEN_DISCONNECT_VERSION_UNSUPPORTED  = 1,
+    WAYWALLEN_DISCONNECT_VERSION_UNSUPPORTED = 1,
     /* daemon `error.code == 1`: hello.protocol string mismatch. */
-    WAYWALLEN_DISCONNECT_PROTOCOL_MISMATCH    = 2,
+    WAYWALLEN_DISCONNECT_PROTOCOL_MISMATCH = 2,
     /* daemon sent an `error` event with an unrecognised code. */
-    WAYWALLEN_DISCONNECT_DAEMON_ERROR         = 3,
+    WAYWALLEN_DISCONNECT_DAEMON_ERROR = 3,
     /* welcome / display_accepted decode failed, or an unexpected
      * opcode arrived during the handshake. */
-    WAYWALLEN_DISCONNECT_HANDSHAKE_FAILED     = 4,
+    WAYWALLEN_DISCONNECT_HANDSHAKE_FAILED = 4,
     /* connect / send / recv syscall failed. */
-    WAYWALLEN_DISCONNECT_SOCKET_IO            = 5,
+    WAYWALLEN_DISCONNECT_SOCKET_IO = 5,
     /* post-handshake wire-format error (bind_buffers, set_config,
      * frame_ready, unbind decode failure). */
-    WAYWALLEN_DISCONNECT_PROTOCOL_ERROR       = 6,
+    WAYWALLEN_DISCONNECT_PROTOCOL_ERROR = 6,
     /* clean EOF / ECONNRESET — the daemon closed the socket. */
-    WAYWALLEN_DISCONNECT_DAEMON_GONE          = 7,
+    WAYWALLEN_DISCONNECT_DAEMON_GONE = 7,
 } waywallen_disconnect_reason_t;
 
-waywallen_disconnect_reason_t
-waywallen_display_last_disconnect_reason(waywallen_display_t *d);
+waywallen_disconnect_reason_t waywallen_display_last_disconnect_reason(waywallen_display_t* d);
 
 /* Always non-NULL; empty string if no disconnect has occurred. The
  * pointer is valid for the lifetime of `d` (or until the next
  * disconnect overwrites the buffer). */
-const char *
-waywallen_display_last_disconnect_message(waywallen_display_t *d);
+const char* waywallen_display_last_disconnect_message(waywallen_display_t* d);
 
 /* -------------------------------------------------------------------------
  * EGL deferred GL texture creation
@@ -652,11 +628,9 @@ waywallen_display_last_disconnect_message(waywallen_display_t *d);
  * texture objects.
  * ------------------------------------------------------------------------- */
 
-int  waywallen_display_create_gl_texture(waywallen_display_t *d,
-                                         uint32_t image_index,
-                                         uint32_t *out_gl_texture);
-void waywallen_display_delete_gl_texture(waywallen_display_t *d,
-                                         uint32_t image_index);
+int  waywallen_display_create_gl_texture(waywallen_display_t* d, uint32_t image_index,
+                                         uint32_t* out_gl_texture);
+void waywallen_display_delete_gl_texture(waywallen_display_t* d, uint32_t image_index);
 
 #ifdef __cplusplus
 } /* extern "C" */

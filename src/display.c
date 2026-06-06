@@ -21,11 +21,11 @@
 #include "ww_proto.h"
 
 #ifdef WW_HAVE_EGL
-#  include "backend_egl.h"
+#    include "backend_egl.h"
 #endif
 #ifdef WW_HAVE_VULKAN
-#  include "backend_vulkan.h"
-#  include "backend_vulkan_blit.h"
+#    include "backend_vulkan.h"
+#    include "backend_vulkan_blit.h"
 #endif
 
 #include <errno.h>
@@ -50,7 +50,7 @@
 /* ------------------------------------------------------------------ */
 
 waywallen_display_version_t waywallen_display_version(void) {
-    return (waywallen_display_version_t){
+    return (waywallen_display_version_t) {
         .major = WAYWALLEN_DISPLAY_VERSION_MAJOR,
         .minor = WAYWALLEN_DISPLAY_VERSION_MINOR,
         .patch = WAYWALLEN_DISPLAY_VERSION_PATCH,
@@ -62,17 +62,16 @@ waywallen_display_version_t waywallen_display_version(void) {
 /* ------------------------------------------------------------------ */
 
 static waywallen_log_callback_t s_log_cb = NULL;
-static void *s_log_ud = NULL;
+static void*                    s_log_ud = NULL;
 
-void waywallen_display_set_log_callback(waywallen_log_callback_t cb,
-                                        void *user_data) {
+void waywallen_display_set_log_callback(waywallen_log_callback_t cb, void* user_data) {
     s_log_cb = cb;
     s_log_ud = user_data;
 }
 
-__attribute__((format(printf, 2, 3), visibility("hidden")))
-void ww_log(waywallen_log_level_t level, const char *fmt, ...) {
-    char buf[512];
+__attribute__((format(printf, 2, 3), visibility("hidden"))) void ww_log(waywallen_log_level_t level,
+                                                                        const char* fmt, ...) {
+    char    buf[512];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
@@ -80,14 +79,14 @@ void ww_log(waywallen_log_level_t level, const char *fmt, ...) {
     if (s_log_cb) {
         s_log_cb(level, buf, s_log_ud);
     } else {
-        static const char *tags[] = { "DEBUG", "INFO", "WARN", "ERROR" };
-        fprintf(stderr, "waywallen_display [%s] %s\n",
-                tags[level < 4 ? level : 3], buf);
+        static const char* tags[] = { "DEBUG", "INFO", "WARN", "ERROR" };
+        fprintf(stderr, "waywallen_display [%s] %s\n", tags[level < 4 ? level : 3], buf);
     }
 }
 
 /* Internal connection state (maps to public waywallen_conn_state_t). */
-typedef enum ww_conn_state {
+typedef enum ww_conn_state
+{
     WW_CONN_DISCONNECTED = 0,
     WW_CONN_CONNECTING,
     WW_CONN_CONNECTED,
@@ -95,14 +94,16 @@ typedef enum ww_conn_state {
 } ww_conn_state_t;
 
 /* Internal stream state (maps to public waywallen_stream_state_t). */
-typedef enum ww_stream_state {
+typedef enum ww_stream_state
+{
     WW_STREAM_INACTIVE = 0,
     WW_STREAM_ACTIVE,
 } ww_stream_state_t;
 
 /* Internal handshake state (maps to public waywallen_handshake_state_t).
  * Numerically aligned with the public enum so the accessor is a cast. */
-typedef enum ww_handshake_state {
+typedef enum ww_handshake_state
+{
     WW_HS_IDLE          = 0,
     WW_HS_CONNECTING    = 1,
     WW_HS_HELLO_PENDING = 2,
@@ -117,8 +118,8 @@ typedef enum ww_handshake_state {
  * the backend reports many fourcc/modifier pairs) and post-handshake
  * requests (update_size, pointer events, unbind_done, bye). Starts
  * small and grows on demand up to WW_OUTBOX_MAX. */
-#define WW_OUTBOX_INITIAL  4096
-#define WW_OUTBOX_MAX     65536  /* one wire frame's worth (u16 length) */
+#define WW_OUTBOX_INITIAL 4096
+#define WW_OUTBOX_MAX     65536 /* one wire frame's worth (u16 length) */
 
 /* Pool teardown is split: the I/O-thread bind_buffers handler enqueues
  * the previous pool's GPU resources here, and the host's render-thread
@@ -127,19 +128,19 @@ typedef enum ww_handshake_state {
  * what closes the cross-thread race documented on the public API. */
 #ifdef WW_HAVE_VULKAN
 struct ww_vk_pending_pool {
-    ww_vk_imported_image_t *images;     /* count entries */
-    VkSemaphore            *semaphores; /* count entries */
-    uint32_t                count;
-    struct ww_vk_pending_pool *next;
+    ww_vk_imported_image_t*    images;     /* count entries */
+    VkSemaphore*               semaphores; /* count entries */
+    uint32_t                   count;
+    struct ww_vk_pending_pool* next;
 };
 #endif
 #ifdef WW_HAVE_EGL
 struct ww_egl_pending_pool {
-    void     **images;        /* EGLImageKHR; count entries */
-    uint32_t  *gl_textures;   /* GLuint; count entries (zero entries skipped) */
-    uint32_t   count;
-    void      *egl_display;   /* EGLDisplay snapshot, NOT owned */
-    struct ww_egl_pending_pool *next;
+    void**                      images;      /* EGLImageKHR; count entries */
+    uint32_t*                   gl_textures; /* GLuint; count entries (zero entries skipped) */
+    uint32_t                    count;
+    void*                       egl_display; /* EGLDisplay snapshot, NOT owned */
+    struct ww_egl_pending_pool* next;
 };
 #endif
 
@@ -147,9 +148,9 @@ struct waywallen_display {
     waywallen_display_callbacks_t cb;
 
     /* Connection to the backend daemon. */
-    int fd;
+    int             fd;
     ww_conn_state_t conn;
-    uint64_t display_id;
+    uint64_t        display_id;
 
     /* Whether the backend is actively pushing frames. */
     ww_stream_state_t stream;
@@ -161,14 +162,14 @@ struct waywallen_display {
      * during handshake (hello / register_display / consumer_caps)
      * and post-handshake (update_size, pointer events, unbind_done,
      * bye). Capacity grows on demand up to WW_OUTBOX_MAX. */
-    uint8_t *out_buf;
-    size_t   out_cap;       /* allocated capacity */
-    size_t   out_len;       /* bytes queued; out_pos..out_len is unsent */
-    size_t   out_pos;       /* bytes already sent into the kernel buffer */
+    uint8_t*              out_buf;
+    size_t                out_cap; /* allocated capacity */
+    size_t                out_len; /* bytes queued; out_pos..out_len is unsent */
+    size_t                out_pos; /* bytes already sent into the kernel buffer */
     ww_codec_recv_state_t hs_recv;
     /* Saved register_display params, captured in begin_connect and
      * applied when WELCOME_WAIT transitions to REGISTER_PEND. */
-    char     hs_display_name[256];
+    char hs_display_name[256];
     /* Stable per-(DE,screen) identifier used by the daemon as the key
      * into per-display settings. Empty string means "no stable id";
      * the daemon then falls back to keying by `hs_display_name`. */
@@ -190,25 +191,25 @@ struct waywallen_display {
     /* Backend selection. */
     waywallen_backend_t backend;
     waywallen_egl_ctx_t egl;
-    waywallen_vk_ctx_t vk;
+    waywallen_vk_ctx_t  vk;
 
 #ifdef WW_HAVE_EGL
     /* Populated on `bind_egl` if libEGL is loadable. */
     ww_egl_backend_t egl_backend;
-    uint32_t egl_import_count;
-    void **egl_images;
-    uint32_t *egl_gl_textures;
+    uint32_t         egl_import_count;
+    void**           egl_images;
+    uint32_t*        egl_gl_textures;
     /* Released-but-not-yet-destroyed pools, drained by the host's
      * render thread via waywallen_display_drain. */
-    struct ww_egl_pending_pool *egl_pending;
+    struct ww_egl_pending_pool* egl_pending;
 #endif
 #ifdef WW_HAVE_VULKAN
-    ww_vk_backend_t vk_backend;
-    uint32_t vk_import_count;
-    ww_vk_imported_image_t *vk_images;   /* length = vk_import_count */
-    VkSemaphore *vk_semaphores;          /* one per buffer slot */
+    ww_vk_backend_t         vk_backend;
+    uint32_t                vk_import_count;
+    ww_vk_imported_image_t* vk_images;     /* length = vk_import_count */
+    VkSemaphore*            vk_semaphores; /* one per buffer slot */
     /* Released-but-not-yet-destroyed pools (see above). */
-    struct ww_vk_pending_pool *vk_pending;
+    struct ww_vk_pending_pool* vk_pending;
 
     /* DMABUF_RELAY only: lib-owned VkInstance/Device/Queue + a blitter
      * that imports producer DMA-BUFs into sampled VkImages and blits
@@ -225,8 +226,8 @@ struct waywallen_display {
     /* Current bound buffer pool metadata — kept so
      * `on_textures_releasing` can fire with the same descriptor when
      * unbind/rebind arrives. */
-    bool has_textures;
-    uint64_t current_buffer_generation;
+    bool                 has_textures;
+    uint64_t             current_buffer_generation;
     waywallen_textures_t current_textures;
 
     /* Last categorised disconnect reason + a fixed-buffer copy of the
@@ -236,7 +237,7 @@ struct waywallen_display {
      * from flush_dead_event in a host-facing entry). Reset to NONE
      * when a subsequent connect reaches CONNECTED. */
     waywallen_disconnect_reason_t last_reason;
-    char last_message[256];
+    char                          last_message[256];
     /* Latched disconnect notification: fire_disconnected_r sets state
      * to DEAD and queues this flag; the host-facing entry that drove
      * the disconnect (dispatch / advance_handshake / handle_writable
@@ -264,14 +265,13 @@ static waywallen_disconnect_reason_t map_daemon_error_code(uint32_t code) {
  * notification. Does NOT call the callback — that happens via
  * flush_dead_event from a host-facing entry. Idempotent on already-
  * dead displays; the first reason wins. */
-static void fire_disconnected_r(waywallen_display_t *d,
-                                waywallen_disconnect_reason_t reason,
-                                int err, const char *msg) {
+static void fire_disconnected_r(waywallen_display_t* d, waywallen_disconnect_reason_t reason,
+                                int err, const char* msg) {
     if (d->conn == WW_CONN_DEAD) return;
-    d->conn = WW_CONN_DEAD;
-    d->stream = WW_STREAM_INACTIVE;
-    d->hs_state = WW_HS_IDLE;
-    d->display_id = 0;
+    d->conn        = WW_CONN_DEAD;
+    d->stream      = WW_STREAM_INACTIVE;
+    d->hs_state    = WW_HS_IDLE;
+    d->display_id  = 0;
     d->last_reason = reason;
     if (msg) {
         size_t n = sizeof(d->last_message) - 1;
@@ -287,7 +287,7 @@ static void fire_disconnected_r(waywallen_display_t *d,
         close(d->fd);
         d->fd = -1;
     }
-    d->dead_err = err;
+    d->dead_err           = err;
     d->dead_event_pending = true;
 }
 
@@ -297,15 +297,15 @@ static void fire_disconnected_r(waywallen_display_t *d,
  * from inside the callback, so any access to `d` after the callback
  * returns is a use-after-free. The caller's compiled return path
  * must not touch `d` afterwards. */
-static void flush_dead_event(waywallen_display_t *d) {
-    if (!d || !d->dead_event_pending) return;
-    d->dead_event_pending = false;
-    waywallen_display_callbacks_t cb = d->cb;
-    int err = d->dead_err;
+static void flush_dead_event(waywallen_display_t* d) {
+    if (! d || ! d->dead_event_pending) return;
+    d->dead_event_pending             = false;
+    waywallen_display_callbacks_t cb  = d->cb;
+    int                           err = d->dead_err;
     /* Snapshot the message pointer into d's own buffer; the lib's API
      * doc says it stays valid for d's lifetime. The host MAY free d
      * from inside on_disconnected — after that, the buffer is gone. */
-    const char *msg = d->last_message;
+    const char* msg = d->last_message;
     if (cb.on_disconnected) {
         cb.on_disconnected(cb.user_data, err, msg);
     }
@@ -315,7 +315,7 @@ static void flush_dead_event(waywallen_display_t *d) {
 /* Default-categorised wrapper for IO/syscall paths. Specific callsites
  * (handshake, decode, daemon error event) call fire_disconnected_r
  * directly with a more precise reason. */
-static void fire_disconnected(waywallen_display_t *d, int err, const char *msg) {
+static void fire_disconnected(waywallen_display_t* d, int err, const char* msg) {
     waywallen_disconnect_reason_t r;
     if (err == WAYWALLEN_ERR_NOTCONN) {
         r = WAYWALLEN_DISCONNECT_DAEMON_GONE;
@@ -329,16 +329,16 @@ static void fire_disconnected(waywallen_display_t *d, int err, const char *msg) 
     fire_disconnected_r(d, r, err, msg);
 }
 
-static void close_all_fds(int *fds, size_t n) {
+static void close_all_fds(int* fds, size_t n) {
     for (size_t i = 0; i < n; i++) {
         if (fds[i] >= 0) close(fds[i]);
     }
 }
 
-static int default_socket_path(char *out, size_t cap) {
-    const char *runtime = getenv("XDG_RUNTIME_DIR");
-    const char *base = (runtime && runtime[0]) ? runtime : "/tmp";
-    int n = snprintf(out, cap, "%s/waywallen/display.sock", base);
+static int default_socket_path(char* out, size_t cap) {
+    const char* runtime = getenv("XDG_RUNTIME_DIR");
+    const char* base    = (runtime && runtime[0]) ? runtime : "/tmp";
+    int         n       = snprintf(out, cap, "%s/waywallen/display.sock", base);
     if (n < 0 || (size_t)n >= cap) return WAYWALLEN_ERR_INVAL;
     return WAYWALLEN_OK;
 }
@@ -348,15 +348,13 @@ static int default_socket_path(char *out, size_t cap) {
  *  < 0   -errno fatal IO
  * On full drain (out_pos == out_len) both counters reset to 0 so the
  * next append starts at the head of the buffer. */
-static int outbox_flush_one(waywallen_display_t *d) {
+static int outbox_flush_one(waywallen_display_t* d) {
     if (d->fd < 0) return -EBADF;
     if (d->out_pos >= d->out_len) {
         d->out_pos = d->out_len = 0;
         return 0;
     }
-    ssize_t n = ww_codec_send_partial(d->fd,
-                                      d->out_buf + d->out_pos,
-                                      d->out_len - d->out_pos);
+    ssize_t n = ww_codec_send_partial(d->fd, d->out_buf + d->out_pos, d->out_len - d->out_pos);
     if (n < 0) return (int)n;
     d->out_pos += (size_t)n;
     if (d->out_pos >= d->out_len) {
@@ -368,16 +366,19 @@ static int outbox_flush_one(waywallen_display_t *d) {
 /* Grow the outbox to hold at least `needed` bytes. Caps at
  * WW_OUTBOX_MAX (one wire frame's worth). Returns 0 on success or
  * -ENOMEM if we hit the cap or realloc fails. */
-static int outbox_reserve(waywallen_display_t *d, size_t needed) {
+static int outbox_reserve(waywallen_display_t* d, size_t needed) {
     if (needed <= d->out_cap) return 0;
     if (needed > WW_OUTBOX_MAX) return -ENOMEM;
     size_t cap = d->out_cap ? d->out_cap : WW_OUTBOX_INITIAL;
     while (cap < needed) {
-        if (cap >= WW_OUTBOX_MAX / 2) { cap = WW_OUTBOX_MAX; break; }
+        if (cap >= WW_OUTBOX_MAX / 2) {
+            cap = WW_OUTBOX_MAX;
+            break;
+        }
         cap *= 2;
     }
-    uint8_t *nb = (uint8_t *)realloc(d->out_buf, cap);
-    if (!nb) return -ENOMEM;
+    uint8_t* nb = (uint8_t*)realloc(d->out_buf, cap);
+    if (! nb) return -ENOMEM;
     d->out_buf = nb;
     d->out_cap = cap;
     return 0;
@@ -391,10 +392,9 @@ static int outbox_reserve(waywallen_display_t *d, size_t needed) {
  * will surface the error.
  *
  * Pre: d->fd >= 0 && d->conn != WW_CONN_DEAD. */
-static int outbox_enqueue_request(waywallen_display_t *d, uint16_t opcode,
-                                  int (*encode)(const void *, ww_buf_t *),
-                                  const void *msg) {
-    if (!d || d->fd < 0 || d->conn == WW_CONN_DEAD) {
+static int outbox_enqueue_request(waywallen_display_t* d, uint16_t                   opcode,
+                                  int (*encode)(const void*, ww_buf_t*), const void* msg) {
+    if (! d || d->fd < 0 || d->conn == WW_CONN_DEAD) {
         return WAYWALLEN_ERR_NOTCONN;
     }
     ww_buf_t body;
@@ -412,15 +412,17 @@ static int outbox_enqueue_request(waywallen_display_t *d, uint16_t opcode,
     if (outbox_reserve(d, d->out_len + total) != 0) {
         ww_log(WAYWALLEN_LOG_ERROR,
                "outbox grow failed (need %zu, cap max %u); dropping op=0x%04x",
-               d->out_len + total, WW_OUTBOX_MAX, opcode);
+               d->out_len + total,
+               WW_OUTBOX_MAX,
+               opcode);
         ww_buf_free(&body);
         return WAYWALLEN_ERR_NOMEM;
     }
-    uint8_t *p = d->out_buf + d->out_len;
-    p[0] = (uint8_t)(opcode & 0xff);
-    p[1] = (uint8_t)((opcode >> 8) & 0xff);
-    p[2] = (uint8_t)(total & 0xff);
-    p[3] = (uint8_t)((total >> 8) & 0xff);
+    uint8_t* p = d->out_buf + d->out_len;
+    p[0]       = (uint8_t)(opcode & 0xff);
+    p[1]       = (uint8_t)((opcode >> 8) & 0xff);
+    p[2]       = (uint8_t)(total & 0xff);
+    p[3]       = (uint8_t)((total >> 8) & 0xff);
     if (body.len > 0) memcpy(p + 4, body.data, body.len);
     d->out_len += total;
     ww_buf_free(&body);
@@ -437,23 +439,23 @@ static int outbox_enqueue_request(waywallen_display_t *d, uint16_t opcode,
 
 /* Encoder trampolines with void-pointer signature so the outbox/
  * handshake helpers can call them generically. */
-static int enc_hello(const void *m, ww_buf_t *out) {
-    return ww_req_hello_encode((const ww_req_hello_t *)m, out);
+static int enc_hello(const void* m, ww_buf_t* out) {
+    return ww_req_hello_encode((const ww_req_hello_t*)m, out);
 }
-static int enc_register(const void *m, ww_buf_t *out) {
-    return ww_req_register_display_encode((const ww_req_register_display_t *)m, out);
+static int enc_register(const void* m, ww_buf_t* out) {
+    return ww_req_register_display_encode((const ww_req_register_display_t*)m, out);
 }
-static int enc_update(const void *m, ww_buf_t *out) {
-    return ww_req_update_display_encode((const ww_req_update_display_t *)m, out);
+static int enc_update(const void* m, ww_buf_t* out) {
+    return ww_req_update_display_encode((const ww_req_update_display_t*)m, out);
 }
 /* enc_release was removed when v1 dropped the BufferRelease request.
  * Release is now signaled by the host on the per-frame
  * release_syncobj fd that arrives with frame_ready. */
-static int enc_consumer_caps(const void *m, ww_buf_t *out) {
-    return ww_req_consumer_caps_encode((const ww_req_consumer_caps_t *)m, out);
+static int enc_consumer_caps(const void* m, ww_buf_t* out) {
+    return ww_req_consumer_caps_encode((const ww_req_consumer_caps_t*)m, out);
 }
-static int enc_unbind_done(const void *m, ww_buf_t *out) {
-    return ww_req_unbind_done_encode((const ww_req_unbind_done_t *)m, out);
+static int enc_unbind_done(const void* m, ww_buf_t* out) {
+    return ww_req_unbind_done_encode((const ww_req_unbind_done_t*)m, out);
 }
 
 /* Modifier-negotiation v2 — bit constants. Mirrored from
@@ -461,47 +463,50 @@ static int enc_unbind_done(const void *m, ww_buf_t *out) {
  *
  * The daemon advertises "modifier_negotiation_v1" in welcome.features
  * to indicate it understands these messages. */
-#define WW_MEM_HINT_DEVICE_LOCAL  (1u << 0)
-#define WW_MEM_HINT_HOST_VISIBLE  (1u << 1)
-#define WW_MEM_HINT_LINEAR_ONLY   (1u << 4)
-#define WW_SYNC_SYNCOBJ_BINARY    (1u << 1)
-#define WW_SYNC_SYNCOBJ_TIMELINE  (1u << 2)
-#define WW_COLOR_ENC_SRGB         (1u << 0)
-#define WW_COLOR_RANGE_LIMITED    (1u << 6)
-#define WW_COLOR_ALPHA_PREMUL     (1u << 7)
+#define WW_MEM_HINT_DEVICE_LOCAL (1u << 0)
+#define WW_MEM_HINT_HOST_VISIBLE (1u << 1)
+#define WW_MEM_HINT_LINEAR_ONLY  (1u << 4)
+#define WW_SYNC_SYNCOBJ_BINARY   (1u << 1)
+#define WW_SYNC_SYNCOBJ_TIMELINE (1u << 2)
+#define WW_COLOR_ENC_SRGB        (1u << 0)
+#define WW_COLOR_RANGE_LIMITED   (1u << 6)
+#define WW_COLOR_ALPHA_PREMUL    (1u << 7)
 /* DRM fourcc whitelist + WW_DRM_FORMAT_MOD_LINEAR live in
  * drm_fourcc_internal.h (included near the top of this file). */
 
 /* Per-(fourcc, modifier) accumulator used while probing the active
  * backend. Grows by doubling. */
 typedef struct ww_caps_buf {
-    uint32_t *fourccs;       /* one entry per modifier (flattened) */
-    uint64_t *modifiers;
-    uint32_t *plane_counts;
+    uint32_t* fourccs; /* one entry per modifier (flattened) */
+    uint64_t* modifiers;
+    uint32_t* plane_counts;
     size_t    n;
     size_t    cap;
     int       oom;
 } ww_caps_buf_t;
 
-static int ww_caps_buf_grow(ww_caps_buf_t *b) {
-    size_t n = b->cap ? b->cap * 2 : 16;
-    uint32_t *f = (uint32_t *)realloc(b->fourccs, n * sizeof(*f));
-    uint64_t *m = (uint64_t *)realloc(b->modifiers, n * sizeof(*m));
-    uint32_t *p = (uint32_t *)realloc(b->plane_counts, n * sizeof(*p));
-    if (!f || !m || !p) {
-        free(f); free(m); free(p);
+static int ww_caps_buf_grow(ww_caps_buf_t* b) {
+    size_t    n = b->cap ? b->cap * 2 : 16;
+    uint32_t* f = (uint32_t*)realloc(b->fourccs, n * sizeof(*f));
+    uint64_t* m = (uint64_t*)realloc(b->modifiers, n * sizeof(*m));
+    uint32_t* p = (uint32_t*)realloc(b->plane_counts, n * sizeof(*p));
+    if (! f || ! m || ! p) {
+        free(f);
+        free(m);
+        free(p);
         b->oom = 1;
         return -ENOMEM;
     }
-    b->fourccs = f; b->modifiers = m; b->plane_counts = p;
-    b->cap = n;
+    b->fourccs      = f;
+    b->modifiers    = m;
+    b->plane_counts = p;
+    b->cap          = n;
     return 0;
 }
 
-static void ww_caps_buf_emit(uint32_t fourcc, uint64_t modifier,
-                             uint32_t plane_count,
-                             void *user_data) {
-    ww_caps_buf_t *b = (ww_caps_buf_t *)user_data;
+static void ww_caps_buf_emit(uint32_t fourcc, uint64_t modifier, uint32_t plane_count,
+                             void* user_data) {
+    ww_caps_buf_t* b = (ww_caps_buf_t*)user_data;
     if (b->oom) return;
     if (b->n >= b->cap && ww_caps_buf_grow(b) != 0) return;
     b->fourccs[b->n]      = fourcc;
@@ -510,7 +515,7 @@ static void ww_caps_buf_emit(uint32_t fourcc, uint64_t modifier,
     b->n++;
 }
 
-static void ww_caps_buf_free(ww_caps_buf_t *b) {
+static void ww_caps_buf_free(ww_caps_buf_t* b) {
     free(b->fourccs);
     free(b->modifiers);
     free(b->plane_counts);
@@ -522,22 +527,24 @@ static void ww_caps_buf_free(ww_caps_buf_t *b) {
  * the number of modifiers attached to fourccs[i]. Stable iteration
  * order: first occurrence of a fourcc wins. Returns 0 on success.
  * Allocates `*out_fourccs` / `*out_mod_counts`; caller frees. */
-static int ww_caps_group_fourccs(const ww_caps_buf_t *flat,
-                                 uint32_t **out_fourccs,
-                                 uint32_t **out_mod_counts,
-                                 size_t *out_n_fourccs) {
-    uint32_t *fourccs = (uint32_t *)calloc(flat->n, sizeof(*fourccs));
-    uint32_t *counts  = (uint32_t *)calloc(flat->n, sizeof(*counts));
-    if (!fourccs || !counts) {
-        free(fourccs); free(counts);
+static int ww_caps_group_fourccs(const ww_caps_buf_t* flat, uint32_t** out_fourccs,
+                                 uint32_t** out_mod_counts, size_t* out_n_fourccs) {
+    uint32_t* fourccs = (uint32_t*)calloc(flat->n, sizeof(*fourccs));
+    uint32_t* counts  = (uint32_t*)calloc(flat->n, sizeof(*counts));
+    if (! fourccs || ! counts) {
+        free(fourccs);
+        free(counts);
         return -ENOMEM;
     }
     size_t k = 0;
     for (size_t i = 0; i < flat->n; ++i) {
-        uint32_t f = flat->fourccs[i];
-        size_t found = SIZE_MAX;
+        uint32_t f     = flat->fourccs[i];
+        size_t   found = SIZE_MAX;
         for (size_t j = 0; j < k; ++j) {
-            if (fourccs[j] == f) { found = j; break; }
+            if (fourccs[j] == f) {
+                found = j;
+                break;
+            }
         }
         if (found == SIZE_MAX) {
             fourccs[k] = f;
@@ -563,11 +570,11 @@ static int ww_caps_group_fourccs(const ww_caps_buf_t *flat,
  * hardcoded ABGR/XRGB + LINEAR set with zero UUIDs only if the
  * probe fails or no backend is bound (the daemon's picker then
  * forces HOST_VISIBLE and treats this peer as cross-GPU). */
-static int send_consumer_caps_blocking(waywallen_display_t *d) {
-    ww_caps_buf_t buf = {0};
-    uint8_t dev_uuid_bytes[16] = {0};
-    uint8_t drv_uuid_bytes[16] = {0};
-    bool advertise_device_local = false;
+static int send_consumer_caps_blocking(waywallen_display_t* d) {
+    ww_caps_buf_t buf                    = { 0 };
+    uint8_t       dev_uuid_bytes[16]     = { 0 };
+    uint8_t       drv_uuid_bytes[16]     = { 0 };
+    bool          advertise_device_local = false;
 
     int probe_rc = -ENOSYS;
     switch (d->backend) {
@@ -575,8 +582,7 @@ static int send_consumer_caps_blocking(waywallen_display_t *d) {
     case WAYWALLEN_BACKEND_EGL:
         if (d->egl_backend.loaded) {
             probe_rc = ww_egl_query_format_caps(
-                &d->egl_backend, (EGLDisplay)d->egl.egl_display,
-                ww_caps_buf_emit, &buf);
+                &d->egl_backend, (EGLDisplay)d->egl.egl_display, ww_caps_buf_emit, &buf);
             /* No portable EGL/GBM way to ask "do you have DEVICE_LOCAL
              * memory I can import a dmabuf into?" — GBM consumers
              * effectively always end up in GTT (HOST_VISIBLE). Leave
@@ -597,14 +603,12 @@ static int send_consumer_caps_blocking(waywallen_display_t *d) {
              * vk_backend is loaded against the library's owned device,
              * so the same probe applies. */
             const uint32_t want_features =
-                VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT
-                | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
-            probe_rc = ww_vk_query_format_caps(
-                &d->vk_backend, want_features, ww_caps_buf_emit, &buf);
+                VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+            probe_rc =
+                ww_vk_query_format_caps(&d->vk_backend, want_features, ww_caps_buf_emit, &buf);
             if (probe_rc == 0) {
                 /* Best-effort UUIDs; ignore failure → leave zeros. */
-                (void)ww_vk_query_device_uuid(
-                    &d->vk_backend, dev_uuid_bytes, drv_uuid_bytes);
+                (void)ww_vk_query_device_uuid(&d->vk_backend, dev_uuid_bytes, drv_uuid_bytes);
                 /* If the device exposes any DEVICE_LOCAL memory type,
                  * advertise the bit so the daemon's same-device
                  * intersection (`pick_mem_hint`) can land on
@@ -613,26 +617,23 @@ static int send_consumer_caps_blocking(waywallen_display_t *d) {
                  * `vkAllocateMemory` time, so this hint only widens
                  * the daemon's choice — it can't force a bad mapping. */
                 int has_dl = 0;
-                (void)ww_vk_query_supports_device_local(
-                    &d->vk_backend, &has_dl);
+                (void)ww_vk_query_supports_device_local(&d->vk_backend, &has_dl);
                 advertise_device_local = (has_dl != 0);
             }
         }
         break;
 #endif
-    default:
-        break;
+    default: break;
     }
     if (probe_rc != 0 || buf.n == 0 || buf.oom) {
         ww_caps_buf_free(&buf);
         ww_log(WAYWALLEN_LOG_INFO,
                "consumer_caps: backend probe unavailable (rc=%d, n=%zu); "
                "falling back to ABGR/XRGB + LINEAR",
-               probe_rc, buf.n);
-        ww_caps_buf_emit(WW_DRM_FORMAT_ABGR8888, WW_DRM_FORMAT_MOD_LINEAR,
-                         1, &buf);
-        ww_caps_buf_emit(WW_DRM_FORMAT_XRGB8888, WW_DRM_FORMAT_MOD_LINEAR,
-                         1, &buf);
+               probe_rc,
+               buf.n);
+        ww_caps_buf_emit(WW_DRM_FORMAT_ABGR8888, WW_DRM_FORMAT_MOD_LINEAR, 1, &buf);
+        ww_caps_buf_emit(WW_DRM_FORMAT_XRGB8888, WW_DRM_FORMAT_MOD_LINEAR, 1, &buf);
     } else {
         ww_log(WAYWALLEN_LOG_INFO,
                "consumer_caps: backend probe yielded %zu (fourcc, modifier) entries",
@@ -643,10 +644,10 @@ static int send_consumer_caps_blocking(waywallen_display_t *d) {
         return -ENOMEM;
     }
 
-    uint32_t *grp_fourccs = NULL;
-    uint32_t *grp_counts  = NULL;
+    uint32_t* grp_fourccs = NULL;
+    uint32_t* grp_counts  = NULL;
     size_t    grp_n       = 0;
-    int gr = ww_caps_group_fourccs(&buf, &grp_fourccs, &grp_counts, &grp_n);
+    int       gr          = ww_caps_group_fourccs(&buf, &grp_fourccs, &grp_counts, &grp_n);
     if (gr != 0) {
         ww_caps_buf_free(&buf);
         return gr;
@@ -677,29 +678,29 @@ static int send_consumer_caps_blocking(waywallen_display_t *d) {
 
     ww_req_consumer_caps_t m;
     memset(&m, 0, sizeof(m));
-    m.fourccs.count       = (uint32_t)grp_n;
-    m.fourccs.data        = grp_fourccs;
-    m.mod_counts.count    = (uint32_t)grp_n;
-    m.mod_counts.data     = grp_counts;
-    m.modifiers.count     = (uint32_t)buf.n;
-    m.modifiers.data      = buf.modifiers;
-    m.plane_counts.count  = (uint32_t)buf.n;
-    m.plane_counts.data   = buf.plane_counts;
-    m.device_uuid.count   = 4;
-    m.device_uuid.data    = dev_uuid_w;
-    m.driver_uuid.count   = 4;
-    m.driver_uuid.data    = drv_uuid_w;
-    m.drm_render_major    = d->hs_drm_render_major;
-    m.drm_render_minor    = d->hs_drm_render_minor;
-    m.mem_hints           = WW_MEM_HINT_HOST_VISIBLE
-                          | (advertise_device_local ? WW_MEM_HINT_DEVICE_LOCAL : 0u)
-                          | (linear_only ? WW_MEM_HINT_LINEAR_ONLY : 0u);
+    m.fourccs.count      = (uint32_t)grp_n;
+    m.fourccs.data       = grp_fourccs;
+    m.mod_counts.count   = (uint32_t)grp_n;
+    m.mod_counts.data    = grp_counts;
+    m.modifiers.count    = (uint32_t)buf.n;
+    m.modifiers.data     = buf.modifiers;
+    m.plane_counts.count = (uint32_t)buf.n;
+    m.plane_counts.data  = buf.plane_counts;
+    m.device_uuid.count  = 4;
+    m.device_uuid.data   = dev_uuid_w;
+    m.driver_uuid.count  = 4;
+    m.driver_uuid.data   = drv_uuid_w;
+    m.drm_render_major   = d->hs_drm_render_major;
+    m.drm_render_minor   = d->hs_drm_render_minor;
+    m.mem_hints          = WW_MEM_HINT_HOST_VISIBLE |
+                           (advertise_device_local ? WW_MEM_HINT_DEVICE_LOCAL : 0u) |
+                           (linear_only ? WW_MEM_HINT_LINEAR_ONLY : 0u);
     /* sync_caps: consumer-side release/wait always lands on the kernel
      * drm_syncobj ioctl path (`waywallen_display_signal_release_syncobj`
      * + `vk/egl_wait_sync_fd`); both BINARY and TIMELINE are always
      * supported regardless of which GPU API the host bound. No probe
      * needed. */
-    m.sync_caps           = WW_SYNC_SYNCOBJ_TIMELINE | WW_SYNC_SYNCOBJ_BINARY;
+    m.sync_caps = WW_SYNC_SYNCOBJ_TIMELINE | WW_SYNC_SYNCOBJ_BINARY;
     /* color_caps: encoding/range/alpha flags are interpretation-time
      * choices, not driver-locked capabilities — the consumer can
      * always sample any sRGB texture and apply any color transform
@@ -707,10 +708,9 @@ static int send_consumer_caps_blocking(waywallen_display_t *d) {
      * compositor settings; daemon falls back to DEFAULT_COLOR per
      * axis if the producer's intersection is empty. No probe
      * needed. */
-    m.color_caps          = WW_COLOR_ENC_SRGB | WW_COLOR_RANGE_LIMITED
-                          | WW_COLOR_ALPHA_PREMUL;
-    m.extent_max_w        = 16384;
-    m.extent_max_h        = 16384;
+    m.color_caps   = WW_COLOR_ENC_SRGB | WW_COLOR_RANGE_LIMITED | WW_COLOR_ALPHA_PREMUL;
+    m.extent_max_w = 16384;
+    m.extent_max_h = 16384;
 
     int rc = outbox_enqueue_request(d, WW_REQ_CONSUMER_CAPS, enc_consumer_caps, &m);
     free(grp_fourccs);
@@ -719,23 +719,23 @@ static int send_consumer_caps_blocking(waywallen_display_t *d) {
     return rc;
 }
 
-static int enc_bye(const void *m, ww_buf_t *out) {
-    return ww_req_bye_encode((const ww_req_bye_t *)m, out);
+static int enc_bye(const void* m, ww_buf_t* out) {
+    return ww_req_bye_encode((const ww_req_bye_t*)m, out);
 }
 
 /* ------------------------------------------------------------------ */
 /*  Lifecycle                                                          */
 /* ------------------------------------------------------------------ */
 
-waywallen_display_t *waywallen_display_new(const waywallen_display_callbacks_t *cb) {
-    if (!cb) return NULL;
-    waywallen_display_t *d = (waywallen_display_t *)calloc(1, sizeof(*d));
-    if (!d) return NULL;
-    d->cb = *cb;
-    d->fd = -1;
-    d->conn = WW_CONN_DISCONNECTED;
-    d->stream = WW_STREAM_INACTIVE;
-    d->backend = WAYWALLEN_BACKEND_NONE;
+waywallen_display_t* waywallen_display_new(const waywallen_display_callbacks_t* cb) {
+    if (! cb) return NULL;
+    waywallen_display_t* d = (waywallen_display_t*)calloc(1, sizeof(*d));
+    if (! d) return NULL;
+    d->cb       = *cb;
+    d->fd       = -1;
+    d->conn     = WW_CONN_DISCONNECTED;
+    d->stream   = WW_STREAM_INACTIVE;
+    d->backend  = WAYWALLEN_BACKEND_NONE;
     d->hs_state = WW_HS_IDLE;
     /* 0 is a valid fd; shadow_dmabuf_fd "unset" sentinel must be -1. */
     d->current_textures.shadow_dmabuf_fd = -1;
@@ -747,8 +747,8 @@ waywallen_display_t *waywallen_display_new(const waywallen_display_callbacks_t *
     return d;
 }
 
-void waywallen_display_free(waywallen_display_t *d) {
-    if (!d) return;
+void waywallen_display_free(waywallen_display_t* d) {
+    if (! d) return;
     if (d->fd >= 0) {
         close(d->fd);
         d->fd = -1;
@@ -767,7 +767,7 @@ void waywallen_display_free(waywallen_display_t *d) {
 #ifdef WW_HAVE_VULKAN
     if (d->vk_pending) {
         uint32_t pool_n = 0, handle_n = 0;
-        for (struct ww_vk_pending_pool *p = d->vk_pending; p; p = p->next) {
+        for (struct ww_vk_pending_pool* p = d->vk_pending; p; p = p->next) {
             pool_n++;
             handle_n += p->count;
         }
@@ -775,11 +775,12 @@ void waywallen_display_free(waywallen_display_t *d) {
                "free: %u Vulkan pending pool(s) (%u image+memory pairs, "
                "%u semaphores) not drained — host must call "
                "waywallen_display_drain on its render thread",
-               pool_n, handle_n, handle_n);
+               pool_n,
+               handle_n,
+               handle_n);
         leak = true;
     }
-    if (d->vk_import_count > 0
-        && (d->vk_images != NULL || d->vk_semaphores != NULL)) {
+    if (d->vk_import_count > 0 && (d->vk_images != NULL || d->vk_semaphores != NULL)) {
         ww_log(WAYWALLEN_LOG_ERROR,
                "free: %u Vulkan imports still bound — host must call "
                "waywallen_display_close before free",
@@ -790,7 +791,7 @@ void waywallen_display_free(waywallen_display_t *d) {
 #ifdef WW_HAVE_EGL
     if (d->egl_pending) {
         uint32_t pool_n = 0, handle_n = 0;
-        for (struct ww_egl_pending_pool *p = d->egl_pending; p; p = p->next) {
+        for (struct ww_egl_pending_pool* p = d->egl_pending; p; p = p->next) {
             pool_n++;
             handle_n += p->count;
         }
@@ -798,11 +799,11 @@ void waywallen_display_free(waywallen_display_t *d) {
                "free: %u EGL pending pool(s) (%u EGLImages + GL textures) "
                "not drained — host must call waywallen_display_drain on "
                "its render thread",
-               pool_n, handle_n);
+               pool_n,
+               handle_n);
         leak = true;
     }
-    if (d->egl_import_count > 0
-        && (d->egl_images != NULL || d->egl_gl_textures != NULL)) {
+    if (d->egl_import_count > 0 && (d->egl_images != NULL || d->egl_gl_textures != NULL)) {
         ww_log(WAYWALLEN_LOG_ERROR,
                "free: %u EGL imports still bound — host must call "
                "waywallen_display_close before free",
@@ -825,12 +826,11 @@ void waywallen_display_free(waywallen_display_t *d) {
     free(d);
 }
 
-int waywallen_display_bind_egl(waywallen_display_t *d,
-                               const waywallen_egl_ctx_t *ctx) {
-    if (!d || !ctx) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_bind_egl(waywallen_display_t* d, const waywallen_egl_ctx_t* ctx) {
+    if (! d || ! ctx) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_DISCONNECTED) return WAYWALLEN_ERR_STATE;
     d->backend = WAYWALLEN_BACKEND_EGL;
-    d->egl = *ctx;
+    d->egl     = *ctx;
 #ifdef WW_HAVE_EGL
     /* Best-effort: if libEGL is on the system, resolve the function
      * pointer table now. Failure is non-fatal — the import path will
@@ -849,13 +849,12 @@ int waywallen_display_bind_egl(waywallen_display_t *d,
          * HOST_VISIBLE on every renderer. */
         if (d->hs_drm_render_major == 0 && d->hs_drm_render_minor == 0) {
             uint32_t major = 0, minor = 0;
-            int qrc = ww_egl_query_drm_render_node(
+            int      qrc = ww_egl_query_drm_render_node(
                 &d->egl_backend, (EGLDisplay)ctx->egl_display, &major, &minor);
             if (qrc == 0) {
                 d->hs_drm_render_major = major;
                 d->hs_drm_render_minor = minor;
-                ww_log(WAYWALLEN_LOG_INFO,
-                       "egl drm render node = %u:%u", major, minor);
+                ww_log(WAYWALLEN_LOG_INFO, "egl drm render node = %u:%u", major, minor);
             } else {
                 ww_log(WAYWALLEN_LOG_INFO,
                        "egl drm render node lookup failed (%d); reporting 0:0",
@@ -867,23 +866,21 @@ int waywallen_display_bind_egl(waywallen_display_t *d,
     return WAYWALLEN_OK;
 }
 
-int waywallen_display_bind_vulkan(waywallen_display_t *d,
-                                  const waywallen_vk_ctx_t *ctx) {
-    if (!d || !ctx) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_bind_vulkan(waywallen_display_t* d, const waywallen_vk_ctx_t* ctx) {
+    if (! d || ! ctx) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_DISCONNECTED) return WAYWALLEN_ERR_STATE;
     /* vk_get_instance_proc_addr may be NULL: the backend will dlopen
      * libvulkan.so.1 and pull vkGetInstanceProcAddr from it directly. */
     d->backend = WAYWALLEN_BACKEND_VULKAN;
-    d->vk = *ctx;
+    d->vk      = *ctx;
 #ifdef WW_HAVE_VULKAN
-    int rc = ww_vk_backend_load(
-        &d->vk_backend,
-        (VkInstance)ctx->instance,
-        (VkPhysicalDevice)ctx->physical_device,
-        (VkDevice)ctx->device,
-        ctx->queue_family_index,
-        (ww_vk_get_instance_proc_addr_fn)ctx->vk_get_instance_proc_addr,
-        true);
+    int rc = ww_vk_backend_load(&d->vk_backend,
+                                (VkInstance)ctx->instance,
+                                (VkPhysicalDevice)ctx->physical_device,
+                                (VkDevice)ctx->device,
+                                ctx->queue_family_index,
+                                (ww_vk_get_instance_proc_addr_fn)ctx->vk_get_instance_proc_addr,
+                                true);
     if (rc != 0) {
         ww_log(WAYWALLEN_LOG_WARN, "vk backend load failed: %d", rc);
         memset(&d->vk_backend, 0, sizeof(d->vk_backend));
@@ -891,13 +888,11 @@ int waywallen_display_bind_vulkan(waywallen_display_t *d,
         ww_log(WAYWALLEN_LOG_INFO, "vk backend loaded");
         if (d->hs_drm_render_major == 0 && d->hs_drm_render_minor == 0) {
             uint32_t major = 0, minor = 0;
-            int qrc = ww_vk_query_drm_render_node(
-                &d->vk_backend, &major, &minor);
+            int      qrc = ww_vk_query_drm_render_node(&d->vk_backend, &major, &minor);
             if (qrc == 0) {
                 d->hs_drm_render_major = major;
                 d->hs_drm_render_minor = minor;
-                ww_log(WAYWALLEN_LOG_INFO,
-                       "vk drm render node = %u:%u", major, minor);
+                ww_log(WAYWALLEN_LOG_INFO, "vk drm render node = %u:%u", major, minor);
             } else {
                 ww_log(WAYWALLEN_LOG_INFO,
                        "vk drm render node lookup failed (%d); reporting 0:0",
@@ -909,8 +904,8 @@ int waywallen_display_bind_vulkan(waywallen_display_t *d,
     return WAYWALLEN_OK;
 }
 
-int waywallen_display_bind_dmabuf_relay(waywallen_display_t *d) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_bind_dmabuf_relay(waywallen_display_t* d) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_DISCONNECTED) return WAYWALLEN_ERR_STATE;
 #ifdef WW_HAVE_VULKAN
     int rc = ww_vk_create_owned(&d->vk_owned);
@@ -954,8 +949,7 @@ int waywallen_display_bind_dmabuf_relay(waywallen_display_t *d) {
         if (ww_vk_query_drm_render_node(&d->vk_backend, &major, &minor) == 0) {
             d->hs_drm_render_major = major;
             d->hs_drm_render_minor = minor;
-            ww_log(WAYWALLEN_LOG_INFO,
-                   "vk relay drm render node = %u:%u", major, minor);
+            ww_log(WAYWALLEN_LOG_INFO, "vk relay drm render node = %u:%u", major, minor);
         }
     }
     return WAYWALLEN_OK;
@@ -965,10 +959,8 @@ int waywallen_display_bind_dmabuf_relay(waywallen_display_t *d) {
 #endif
 }
 
-int waywallen_display_set_drm_render_node(waywallen_display_t *d,
-                                          uint32_t major,
-                                          uint32_t minor) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_set_drm_render_node(waywallen_display_t* d, uint32_t major, uint32_t minor) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_DISCONNECTED) return WAYWALLEN_ERR_STATE;
     d->hs_drm_render_major = major;
     d->hs_drm_render_minor = minor;
@@ -982,20 +974,20 @@ int waywallen_display_set_drm_render_node(waywallen_display_t *d,
 /* Open a UDS in non-blocking mode. *out_in_progress is true when
  * connect(2) returned EINPROGRESS (kernel will signal POLLOUT once
  * the connect completes). Returns fd on success, -errno on failure. */
-static int open_uds_nonblock(const char *path, bool *out_in_progress) {
+static int open_uds_nonblock(const char* path, bool* out_in_progress) {
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (fd < 0) return -errno;
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    size_t pl = strlen(path);
+    size_t pl       = strlen(path);
     if (pl >= sizeof(addr.sun_path)) {
         close(fd);
         return -ENAMETOOLONG;
     }
     memcpy(addr.sun_path, path, pl);
     *out_in_progress = false;
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         if (errno == EINPROGRESS) {
             *out_in_progress = true;
             return fd;
@@ -1009,9 +1001,8 @@ static int open_uds_nonblock(const char *path, bool *out_in_progress) {
 
 /* Encode `msg` via `encode` into a temp ww_buf_t, then frame
  * (header + body) into d->out_buf for the partial sender to drain. */
-static int hs_queue_request(waywallen_display_t *d, uint16_t opcode,
-                            int (*encode)(const void *, ww_buf_t *),
-                            const void *msg) {
+static int hs_queue_request(waywallen_display_t* d, uint16_t                   opcode,
+                            int (*encode)(const void*, ww_buf_t*), const void* msg) {
     ww_buf_t body;
     ww_buf_init(&body);
     int rc = encode(msg, &body);
@@ -1035,49 +1026,44 @@ static int hs_queue_request(waywallen_display_t *d, uint16_t opcode,
     return WAYWALLEN_OK;
 }
 
-static int hs_queue_hello(waywallen_display_t *d) {
+static int hs_queue_hello(waywallen_display_t* d) {
     ww_req_hello_t hello;
     memset(&hello, 0, sizeof(hello));
     waywallen_display_version_t v = waywallen_display_version();
-    char version_buf[32];
-    snprintf(version_buf, sizeof(version_buf), "%u.%u.%u",
-             v.major, v.minor, v.patch);
-    hello.protocol = (char *)WW_PROTOCOL_NAME;
-    hello.client_name = (char *)"libwaywallen_display";
-    hello.client_version = version_buf;
+    char                        version_buf[32];
+    snprintf(version_buf, sizeof(version_buf), "%u.%u.%u", v.major, v.minor, v.patch);
+    hello.protocol                = (char*)WW_PROTOCOL_NAME;
+    hello.client_name             = (char*)"libwaywallen_display";
+    hello.client_version          = version_buf;
     hello.client_protocol_version = WAYWALLEN_DISPLAY_PROTOCOL_VERSION;
     return hs_queue_request(d, WW_REQ_HELLO, enc_hello, &hello);
 }
 
-static int hs_queue_register(waywallen_display_t *d) {
+static int hs_queue_register(waywallen_display_t* d) {
     ww_req_register_display_t reg;
     memset(&reg, 0, sizeof(reg));
-    reg.name = d->hs_display_name;
-    reg.instance_id = d->hs_instance_id;
-    reg.width = d->hs_display_width;
-    reg.height = d->hs_display_height;
-    reg.refresh_mhz = d->hs_display_refresh_mhz;
+    reg.name             = d->hs_display_name;
+    reg.instance_id      = d->hs_instance_id;
+    reg.width            = d->hs_display_width;
+    reg.height           = d->hs_display_height;
+    reg.refresh_mhz      = d->hs_display_refresh_mhz;
     reg.drm_render_major = d->hs_drm_render_major;
     reg.drm_render_minor = d->hs_drm_render_minor;
     reg.properties.count = 0;
-    reg.properties.data = NULL;
+    reg.properties.data  = NULL;
     return hs_queue_request(d, WW_REQ_REGISTER_DISPLAY, enc_register, &reg);
 }
 
-int waywallen_display_begin_connect(waywallen_display_t *d,
-                                       const char *socket_path,
-                                       const char *display_name,
-                                       const char *instance_id,
-                                       uint32_t width,
-                                       uint32_t height,
-                                       uint32_t refresh_mhz) {
-    if (!d || !display_name) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_begin_connect(waywallen_display_t* d, const char* socket_path,
+                                    const char* display_name, const char* instance_id,
+                                    uint32_t width, uint32_t height, uint32_t refresh_mhz) {
+    if (! d || ! display_name) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_DISCONNECTED && d->conn != WW_CONN_DEAD) {
         return WAYWALLEN_ERR_STATE;
     }
 
     char path_buf[256];
-    if (!socket_path) {
+    if (! socket_path) {
         int rc = default_socket_path(path_buf, sizeof(path_buf));
         if (rc != WAYWALLEN_OK) return rc;
         socket_path = path_buf;
@@ -1096,23 +1082,23 @@ int waywallen_display_begin_connect(waywallen_display_t *d,
     } else {
         d->hs_instance_id[0] = '\0';
     }
-    d->hs_display_width = width;
-    d->hs_display_height = height;
+    d->hs_display_width       = width;
+    d->hs_display_height      = height;
     d->hs_display_refresh_mhz = refresh_mhz;
 
     bool in_progress = false;
-    int fd = open_uds_nonblock(socket_path, &in_progress);
+    int  fd          = open_uds_nonblock(socket_path, &in_progress);
     if (fd < 0) {
         return WAYWALLEN_ERR_IO;
     }
-    d->fd = fd;
-    d->conn = WW_CONN_CONNECTING;
+    d->fd     = fd;
+    d->conn   = WW_CONN_CONNECTING;
     d->stream = WW_STREAM_INACTIVE;
     ww_codec_recv_state_reset(&d->hs_recv);
-    d->out_len = 0;
-    d->out_pos = 0;
+    d->out_len            = 0;
+    d->out_pos            = 0;
     d->dead_event_pending = false;
-    d->dead_err = 0;
+    d->dead_err           = 0;
 
     if (in_progress) {
         d->hs_state = WW_HS_CONNECTING;
@@ -1122,8 +1108,8 @@ int waywallen_display_begin_connect(waywallen_display_t *d,
         int rc = hs_queue_hello(d);
         if (rc != WAYWALLEN_OK) {
             close(d->fd);
-            d->fd = -1;
-            d->conn = WW_CONN_DEAD;
+            d->fd       = -1;
+            d->conn     = WW_CONN_DEAD;
             d->hs_state = WW_HS_IDLE;
             return rc;
         }
@@ -1132,21 +1118,20 @@ int waywallen_display_begin_connect(waywallen_display_t *d,
     return WAYWALLEN_OK;
 }
 
-waywallen_handshake_state_t waywallen_display_handshake_state(waywallen_display_t *d) {
-    if (!d) return WAYWALLEN_HS_IDLE;
+waywallen_handshake_state_t waywallen_display_handshake_state(waywallen_display_t* d) {
+    if (! d) return WAYWALLEN_HS_IDLE;
     return (waywallen_handshake_state_t)d->hs_state;
 }
 
 /* Internal: advance one logical step. May return PROGRESS, in which
  * case advance_handshake() loops back into this function. */
-static int hs_advance_one(waywallen_display_t *d) {
+static int hs_advance_one(waywallen_display_t* d) {
     switch (d->hs_state) {
     case WW_HS_IDLE:
-    case WW_HS_READY:
-        return WAYWALLEN_ERR_STATE;
+    case WW_HS_READY: return WAYWALLEN_ERR_STATE;
 
     case WW_HS_CONNECTING: {
-        int err = 0;
+        int       err    = 0;
         socklen_t errlen = sizeof(err);
         if (getsockopt(d->fd, SOL_SOCKET, SO_ERROR, &err, &errlen) < 0) {
             fire_disconnected(d, WAYWALLEN_ERR_IO, "getsockopt SO_ERROR");
@@ -1168,9 +1153,7 @@ static int hs_advance_one(waywallen_display_t *d) {
 
     case WW_HS_HELLO_PENDING:
     case WW_HS_REGISTER_PEND: {
-        ssize_t n = ww_codec_send_partial(d->fd,
-                                          d->out_buf + d->out_pos,
-                                          d->out_len - d->out_pos);
+        ssize_t n = ww_codec_send_partial(d->fd, d->out_buf + d->out_pos, d->out_len - d->out_pos);
         if (n < 0) {
             fire_disconnected(d, WAYWALLEN_ERR_IO, "send handshake");
             return WAYWALLEN_ERR_IO;
@@ -1192,8 +1175,7 @@ static int hs_advance_one(waywallen_display_t *d) {
         int rc = ww_codec_recv_partial(d->fd, &d->hs_recv);
         if (rc == WW_CODEC_FRAME_NEED) return WAYWALLEN_HS_NEED_READ;
         if (rc < 0) {
-            int werr = (rc == -ECONNRESET) ? WAYWALLEN_ERR_NOTCONN
-                                            : WAYWALLEN_ERR_IO;
+            int werr = (rc == -ECONNRESET) ? WAYWALLEN_ERR_NOTCONN : WAYWALLEN_ERR_IO;
             fire_disconnected(d, werr, "recv welcome");
             return werr;
         }
@@ -1202,18 +1184,18 @@ static int hs_advance_one(waywallen_display_t *d) {
         d->hs_recv.n_fds = 0;
         if (d->hs_recv.op == WW_EVT_ERROR) {
             ww_evt_error_t er;
-            const char *msg = "server error";
+            const char*    msg = "server error";
             if (ww_evt_error_decode(d->hs_recv.body, d->hs_recv.body_len, &er) == WW_OK) {
                 if (er.message) msg = er.message;
                 /* Capture code BEFORE fire_disconnected_r — the
                  * callback may free d via destroy(), but `er` is on
                  * our stack and safe to free unconditionally below. */
                 uint32_t code = er.code;
-                fire_disconnected_r(d, map_daemon_error_code(code),
-                                    WAYWALLEN_ERR_PROTO, msg);
+                fire_disconnected_r(d, map_daemon_error_code(code), WAYWALLEN_ERR_PROTO, msg);
                 ww_evt_error_free(&er);
             } else {
-                fire_disconnected_r(d, WAYWALLEN_DISCONNECT_DAEMON_ERROR,
+                fire_disconnected_r(d,
+                                    WAYWALLEN_DISCONNECT_DAEMON_ERROR,
                                     WAYWALLEN_ERR_PROTO,
                                     "server error (decode failed)");
             }
@@ -1223,8 +1205,8 @@ static int hs_advance_one(waywallen_display_t *d) {
             return WAYWALLEN_ERR_PROTO;
         }
         if (d->hs_recv.op != WW_EVT_WELCOME) {
-            fire_disconnected_r(d, WAYWALLEN_DISCONNECT_HANDSHAKE_FAILED,
-                                WAYWALLEN_ERR_PROTO, "expected welcome");
+            fire_disconnected_r(
+                d, WAYWALLEN_DISCONNECT_HANDSHAKE_FAILED, WAYWALLEN_ERR_PROTO, "expected welcome");
             return WAYWALLEN_ERR_PROTO;
         }
         /* Decode purely for diagnostics — `welcome` is informational
@@ -1232,10 +1214,9 @@ static int hs_advance_one(waywallen_display_t *d) {
          * daemon before it sent welcome; reaching here means we are
          * a supported client. Features are advisory only. */
         ww_evt_welcome_t welcome;
-        if (ww_evt_welcome_decode(d->hs_recv.body, d->hs_recv.body_len,
-                                  &welcome) != WW_OK) {
-            fire_disconnected_r(d, WAYWALLEN_DISCONNECT_HANDSHAKE_FAILED,
-                                WAYWALLEN_ERR_PROTO, "decode welcome");
+        if (ww_evt_welcome_decode(d->hs_recv.body, d->hs_recv.body_len, &welcome) != WW_OK) {
+            fire_disconnected_r(
+                d, WAYWALLEN_DISCONNECT_HANDSHAKE_FAILED, WAYWALLEN_ERR_PROTO, "decode welcome");
             return WAYWALLEN_ERR_PROTO;
         }
         ww_evt_welcome_free(&welcome);
@@ -1253,8 +1234,7 @@ static int hs_advance_one(waywallen_display_t *d) {
         int rc = ww_codec_recv_partial(d->fd, &d->hs_recv);
         if (rc == WW_CODEC_FRAME_NEED) return WAYWALLEN_HS_NEED_READ;
         if (rc < 0) {
-            int werr = (rc == -ECONNRESET) ? WAYWALLEN_ERR_NOTCONN
-                                            : WAYWALLEN_ERR_IO;
+            int werr = (rc == -ECONNRESET) ? WAYWALLEN_ERR_NOTCONN : WAYWALLEN_ERR_IO;
             fire_disconnected(d, werr, "recv display_accepted");
             return werr;
         }
@@ -1262,15 +1242,15 @@ static int hs_advance_one(waywallen_display_t *d) {
         d->hs_recv.n_fds = 0;
         if (d->hs_recv.op == WW_EVT_ERROR) {
             ww_evt_error_t er;
-            const char *msg = "server error";
+            const char*    msg = "server error";
             if (ww_evt_error_decode(d->hs_recv.body, d->hs_recv.body_len, &er) == WW_OK) {
                 if (er.message) msg = er.message;
                 uint32_t code = er.code;
-                fire_disconnected_r(d, map_daemon_error_code(code),
-                                    WAYWALLEN_ERR_PROTO, msg);
+                fire_disconnected_r(d, map_daemon_error_code(code), WAYWALLEN_ERR_PROTO, msg);
                 ww_evt_error_free(&er);
             } else {
-                fire_disconnected_r(d, WAYWALLEN_DISCONNECT_DAEMON_ERROR,
+                fire_disconnected_r(d,
+                                    WAYWALLEN_DISCONNECT_DAEMON_ERROR,
                                     WAYWALLEN_ERR_PROTO,
                                     "server error (decode failed)");
             }
@@ -1278,23 +1258,26 @@ static int hs_advance_one(waywallen_display_t *d) {
             return WAYWALLEN_ERR_PROTO;
         }
         if (d->hs_recv.op != WW_EVT_DISPLAY_ACCEPTED) {
-            fire_disconnected_r(d, WAYWALLEN_DISCONNECT_HANDSHAKE_FAILED,
-                                WAYWALLEN_ERR_PROTO, "expected display_accepted");
+            fire_disconnected_r(d,
+                                WAYWALLEN_DISCONNECT_HANDSHAKE_FAILED,
+                                WAYWALLEN_ERR_PROTO,
+                                "expected display_accepted");
             return WAYWALLEN_ERR_PROTO;
         }
         ww_evt_display_accepted_t accepted;
-        if (ww_evt_display_accepted_decode(d->hs_recv.body,
-                                           d->hs_recv.body_len,
-                                           &accepted) != WW_OK) {
-            fire_disconnected_r(d, WAYWALLEN_DISCONNECT_HANDSHAKE_FAILED,
-                                WAYWALLEN_ERR_PROTO, "decode display_accepted");
+        if (ww_evt_display_accepted_decode(d->hs_recv.body, d->hs_recv.body_len, &accepted) !=
+            WW_OK) {
+            fire_disconnected_r(d,
+                                WAYWALLEN_DISCONNECT_HANDSHAKE_FAILED,
+                                WAYWALLEN_ERR_PROTO,
+                                "decode display_accepted");
             /* d may be freed; do not touch. */
             return WAYWALLEN_ERR_PROTO;
         }
         d->display_id = accepted.display_id;
         ww_evt_display_accepted_free(&accepted);
-        d->conn = WW_CONN_CONNECTED;
-        d->last_reason = WAYWALLEN_DISCONNECT_NONE;
+        d->conn            = WW_CONN_CONNECTED;
+        d->last_reason     = WAYWALLEN_DISCONNECT_NONE;
         d->last_message[0] = '\0';
         // Modifier-negotiation v2 — ship a hardcoded LINEAR-only
         // ConsumerCaps before transitioning to READY. Real probing
@@ -1315,8 +1298,8 @@ static int hs_advance_one(waywallen_display_t *d) {
     return WAYWALLEN_ERR_STATE;
 }
 
-int waywallen_display_advance_handshake(waywallen_display_t *d) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_advance_handshake(waywallen_display_t* d) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_CONNECTING) return WAYWALLEN_ERR_NOTCONN;
     /* Loop while the state machine reports PROGRESS so the caller only
      * sees terminal codes (DONE / NEED_* / error). Bounded by the
@@ -1333,16 +1316,11 @@ int waywallen_display_advance_handshake(waywallen_display_t *d) {
     return rc;
 }
 
-int waywallen_display_connect(waywallen_display_t *d,
-                              const char *socket_path,
-                              const char *display_name,
-                              const char *instance_id,
-                              uint32_t width,
-                              uint32_t height,
-                              uint32_t refresh_mhz) {
-    int rc = waywallen_display_begin_connect(d, socket_path, display_name,
-                                             instance_id, width, height,
-                                             refresh_mhz);
+int waywallen_display_connect(waywallen_display_t* d, const char* socket_path,
+                              const char* display_name, const char* instance_id, uint32_t width,
+                              uint32_t height, uint32_t refresh_mhz) {
+    int rc = waywallen_display_begin_connect(
+        d, socket_path, display_name, instance_id, width, height, refresh_mhz);
     if (rc != WAYWALLEN_OK) return rc;
     int fd = waywallen_display_get_fd(d);
     for (;;) {
@@ -1350,11 +1328,14 @@ int waywallen_display_connect(waywallen_display_t *d,
         if (rc == WAYWALLEN_HS_DONE) return WAYWALLEN_OK;
         if (rc < 0) return rc;
         struct pollfd pfd;
-        pfd.fd = fd;
+        pfd.fd      = fd;
         pfd.revents = 0;
-        if (rc == WAYWALLEN_HS_NEED_READ)       pfd.events = POLLIN;
-        else if (rc == WAYWALLEN_HS_NEED_WRITE) pfd.events = POLLOUT;
-        else                                    pfd.events = POLLIN | POLLOUT;
+        if (rc == WAYWALLEN_HS_NEED_READ)
+            pfd.events = POLLIN;
+        else if (rc == WAYWALLEN_HS_NEED_WRITE)
+            pfd.events = POLLOUT;
+        else
+            pfd.events = POLLIN | POLLOUT;
         int n = poll(&pfd, 1, -1);
         if (n < 0) {
             if (errno == EINTR) continue;
@@ -1363,40 +1344,38 @@ int waywallen_display_connect(waywallen_display_t *d,
     }
 }
 
-int waywallen_display_update_size(waywallen_display_t *d,
-                                  uint32_t width,
-                                  uint32_t height) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_update_size(waywallen_display_t* d, uint32_t width, uint32_t height) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_CONNECTED) {
         return WAYWALLEN_ERR_STATE;
     }
     ww_req_update_display_t upd;
     memset(&upd, 0, sizeof(upd));
-    upd.width = width;
-    upd.height = height;
+    upd.width            = width;
+    upd.height           = height;
     upd.properties.count = 0;
-    upd.properties.data = NULL;
+    upd.properties.data  = NULL;
     /* Outbox-full (ERR_IO) is recoverable — the host can retry on the
      * next size change. The connection itself is fine; only fatal
      * dispatch / handle_writable transitions surface fire_disconnected. */
     return outbox_enqueue_request(d, WW_REQ_UPDATE_DISPLAY, enc_update, &upd);
 }
 
-static int enc_window_state(const void *m, ww_buf_t *out) {
-    return ww_req_window_state_encode((const ww_req_window_state_t *)m, out);
+static int enc_window_state(const void* m, ww_buf_t* out) {
+    return ww_req_window_state_encode((const ww_req_window_state_t*)m, out);
 }
 
-int waywallen_display_set_window_state(waywallen_display_t *d, uint32_t flags) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_set_window_state(waywallen_display_t* d, uint32_t flags) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_CONNECTED) return WAYWALLEN_ERR_STATE;
     /* Outbox-tail coalesce. window_state's wire frame is fixed: 4-byte
      * header + 4-byte u32 body = 8 bytes. If the most recent unsent
      * entry is also a window_state, overwrite its body in place — a
      * stale snapshot must never land behind a fresh one. */
     if (d->out_len >= d->out_pos + 8) {
-        uint8_t *tail = d->out_buf + d->out_len - 8;
-        uint16_t op  = (uint16_t)((uint16_t)tail[0] | ((uint16_t)tail[1] << 8));
-        uint16_t len = (uint16_t)((uint16_t)tail[2] | ((uint16_t)tail[3] << 8));
+        uint8_t* tail = d->out_buf + d->out_len - 8;
+        uint16_t op   = (uint16_t)((uint16_t)tail[0] | ((uint16_t)tail[1] << 8));
+        uint16_t len  = (uint16_t)((uint16_t)tail[2] | ((uint16_t)tail[3] << 8));
         if (op == WW_REQ_WINDOW_STATE && len == 8) {
             tail[4] = (uint8_t)(flags & 0xff);
             tail[5] = (uint8_t)((flags >> 8) & 0xff);
@@ -1411,47 +1390,37 @@ int waywallen_display_set_window_state(waywallen_display_t *d, uint32_t flags) {
     return outbox_enqueue_request(d, WW_REQ_WINDOW_STATE, enc_window_state, &msg);
 }
 
-static int enc_pointer_motion(const void *m, ww_buf_t *out) {
-    return ww_req_pointer_motion_encode((const ww_req_pointer_motion_t *)m, out);
+static int enc_pointer_motion(const void* m, ww_buf_t* out) {
+    return ww_req_pointer_motion_encode((const ww_req_pointer_motion_t*)m, out);
 }
-static int enc_pointer_button(const void *m, ww_buf_t *out) {
-    return ww_req_pointer_button_encode((const ww_req_pointer_button_t *)m, out);
+static int enc_pointer_button(const void* m, ww_buf_t* out) {
+    return ww_req_pointer_button_encode((const ww_req_pointer_button_t*)m, out);
 }
-static int enc_pointer_axis(const void *m, ww_buf_t *out) {
-    return ww_req_pointer_axis_encode((const ww_req_pointer_axis_t *)m, out);
+static int enc_pointer_axis(const void* m, ww_buf_t* out) {
+    return ww_req_pointer_axis_encode((const ww_req_pointer_axis_t*)m, out);
 }
 
-int waywallen_display_send_pointer_motion(waywallen_display_t *d,
-                                          float x, float y,
-                                          uint64_t timestamp_us,
-                                          uint32_t modifiers) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_send_pointer_motion(waywallen_display_t* d, float x, float y,
+                                          uint64_t timestamp_us, uint32_t modifiers) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_CONNECTED) return WAYWALLEN_ERR_STATE;
     ww_req_pointer_motion_t msg = { x, y, timestamp_us, modifiers };
     return outbox_enqueue_request(d, WW_REQ_POINTER_MOTION, enc_pointer_motion, &msg);
 }
 
-int waywallen_display_send_pointer_button(waywallen_display_t *d,
-                                          float x, float y,
-                                          uint32_t button,
-                                          waywallen_button_state_t state,
-                                          uint64_t timestamp_us,
+int waywallen_display_send_pointer_button(waywallen_display_t* d, float x, float y, uint32_t button,
+                                          waywallen_button_state_t state, uint64_t timestamp_us,
                                           uint32_t modifiers) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+    if (! d) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_CONNECTED) return WAYWALLEN_ERR_STATE;
-    ww_req_pointer_button_t msg = {
-        x, y, button, (uint32_t)state, timestamp_us, modifiers
-    };
+    ww_req_pointer_button_t msg = { x, y, button, (uint32_t)state, timestamp_us, modifiers };
     return outbox_enqueue_request(d, WW_REQ_POINTER_BUTTON, enc_pointer_button, &msg);
 }
 
-int waywallen_display_send_pointer_axis(waywallen_display_t *d,
-                                        float x, float y,
-                                        float delta_x, float delta_y,
-                                        waywallen_axis_source_t source,
-                                        uint64_t timestamp_us,
-                                        uint32_t modifiers) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_send_pointer_axis(waywallen_display_t* d, float x, float y, float delta_x,
+                                        float delta_y, waywallen_axis_source_t source,
+                                        uint64_t timestamp_us, uint32_t modifiers) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
     if (d->conn != WW_CONN_CONNECTED) return WAYWALLEN_ERR_STATE;
     ww_req_pointer_axis_t msg = {
         x, y, delta_x, delta_y, (uint32_t)source, timestamp_us, modifiers
@@ -1459,13 +1428,13 @@ int waywallen_display_send_pointer_axis(waywallen_display_t *d,
     return outbox_enqueue_request(d, WW_REQ_POINTER_AXIS, enc_pointer_axis, &msg);
 }
 
-int waywallen_display_get_fd(waywallen_display_t *d) {
-    if (!d) return -1;
+int waywallen_display_get_fd(waywallen_display_t* d) {
+    if (! d) return -1;
     return d->fd;
 }
 
-bool waywallen_display_wants_writable(waywallen_display_t *d) {
-    if (!d || d->fd < 0 || d->conn == WW_CONN_DEAD) return false;
+bool waywallen_display_wants_writable(waywallen_display_t* d) {
+    if (! d || d->fd < 0 || d->conn == WW_CONN_DEAD) return false;
     /* During handshake, the state machine (driven by advance_handshake)
      * owns POLLOUT arming via its NEED_WRITE return code; report false
      * here so the host does not double-arm. Post-handshake (READY or
@@ -1477,16 +1446,16 @@ bool waywallen_display_wants_writable(waywallen_display_t *d) {
     return d->out_pos < d->out_len;
 }
 
-int waywallen_display_handle_writable(waywallen_display_t *d) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_handle_writable(waywallen_display_t* d) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
     if (d->fd < 0 || d->conn == WW_CONN_DEAD) return WAYWALLEN_ERR_NOTCONN;
     int sent = outbox_flush_one(d);
-    int ret = WAYWALLEN_OK;
+    int ret  = WAYWALLEN_OK;
     if (sent < 0) {
         fire_disconnected(d, WAYWALLEN_ERR_IO, "outbox flush");
         ret = WAYWALLEN_ERR_IO;
     }
-    flush_dead_event(d);  /* must be last; may free d */
+    flush_dead_event(d); /* must be last; may free d */
     return ret;
 }
 
@@ -1499,9 +1468,9 @@ int waywallen_display_handle_writable(waywallen_display_t *d) {
  * heap allocation; we free the embedded arrays here, free `p` itself
  * outside. Must be called from a thread with the host's GL context
  * current (glDeleteTextures requires it). */
-static void egl_destroy_pending_pool_inplace(waywallen_display_t *d,
-                                             struct ww_egl_pending_pool *p) {
-    if (!p) return;
+static void egl_destroy_pending_pool_inplace(waywallen_display_t*        d,
+                                             struct ww_egl_pending_pool* p) {
+    if (! p) return;
     if (d->egl_backend.loaded) {
         if (p->gl_textures) {
             d->egl_backend.glDeleteTextures((int)p->count, p->gl_textures);
@@ -1509,9 +1478,8 @@ static void egl_destroy_pending_pool_inplace(waywallen_display_t *d,
         if (p->images && p->egl_display) {
             for (uint32_t i = 0; i < p->count; i++) {
                 if (p->images[i]) {
-                    ww_egl_destroy_image(&d->egl_backend,
-                                         (EGLDisplay)p->egl_display,
-                                         (EGLImageKHR)p->images[i]);
+                    ww_egl_destroy_image(
+                        &d->egl_backend, (EGLDisplay)p->egl_display, (EGLImageKHR)p->images[i]);
                 }
             }
         }
@@ -1525,19 +1493,17 @@ static void egl_destroy_pending_pool_inplace(waywallen_display_t *d,
  * actual destruction is deferred to
  * `waywallen_display_drain` so it happens on the
  * thread holding the host's GL context. */
-static void egl_release_current_pool(waywallen_display_t *d) {
-    if (d->egl_import_count == 0
-        || (!d->egl_images && !d->egl_gl_textures)) {
+static void egl_release_current_pool(waywallen_display_t* d) {
+    if (d->egl_import_count == 0 || (! d->egl_images && ! d->egl_gl_textures)) {
         free(d->egl_images);
         free(d->egl_gl_textures);
-        d->egl_images = NULL;
-        d->egl_gl_textures = NULL;
+        d->egl_images       = NULL;
+        d->egl_gl_textures  = NULL;
         d->egl_import_count = 0;
         return;
     }
-    struct ww_egl_pending_pool *p =
-        (struct ww_egl_pending_pool *)calloc(1, sizeof(*p));
-    if (!p) {
+    struct ww_egl_pending_pool* p = (struct ww_egl_pending_pool*)calloc(1, sizeof(*p));
+    if (! p) {
         /* Allocation failed: leak the GL/EGL handles rather than
          * destroying them on the wrong thread (silent UB). The host's
          * waywallen_display_free leak-detect path will catch any
@@ -1548,24 +1514,24 @@ static void egl_release_current_pool(waywallen_display_t *d) {
                d->egl_import_count);
         free(d->egl_images);
         free(d->egl_gl_textures);
-        d->egl_images = NULL;
-        d->egl_gl_textures = NULL;
+        d->egl_images       = NULL;
+        d->egl_gl_textures  = NULL;
         d->egl_import_count = 0;
         return;
     }
-    p->images = d->egl_images;
-    p->gl_textures = d->egl_gl_textures;
-    p->count = d->egl_import_count;
-    p->egl_display = d->egl.egl_display;
-    d->egl_images = NULL;
-    d->egl_gl_textures = NULL;
+    p->images           = d->egl_images;
+    p->gl_textures      = d->egl_gl_textures;
+    p->count            = d->egl_import_count;
+    p->egl_display      = d->egl.egl_display;
+    d->egl_images       = NULL;
+    d->egl_gl_textures  = NULL;
     d->egl_import_count = 0;
 
     pthread_mutex_lock(&d->pending_mutex);
-    p->next = d->egl_pending;
+    p->next        = d->egl_pending;
     d->egl_pending = p;
-    unsigned len = 0;
-    for (struct ww_egl_pending_pool *cur = d->egl_pending; cur; cur = cur->next) len++;
+    unsigned len   = 0;
+    for (struct ww_egl_pending_pool* cur = d->egl_pending; cur; cur = cur->next) len++;
     pthread_mutex_unlock(&d->pending_mutex);
     /* Visibility: host should drain on its render thread every frame.
      * If the list grows beyond a few entries the host either stopped
@@ -1573,7 +1539,8 @@ static void egl_release_current_pool(waywallen_display_t *d) {
     if (len > 4) {
         ww_log(WAYWALLEN_LOG_WARN,
                "egl pending pool list grew to %u — host render thread "
-               "is not draining", len);
+               "is not draining",
+               len);
     }
 }
 #endif
@@ -1584,9 +1551,8 @@ static void egl_release_current_pool(waywallen_display_t *d) {
  * (host's render thread, post fence-wait) — we deliberately do NOT
  * vkDeviceWaitIdle here since that's the call that races with
  * vkQueueSubmit elsewhere. */
-static void vk_destroy_pending_pool_inplace(waywallen_display_t *d,
-                                            struct ww_vk_pending_pool *p) {
-    if (!p) return;
+static void vk_destroy_pending_pool_inplace(waywallen_display_t* d, struct ww_vk_pending_pool* p) {
+    if (! p) return;
     if (d->vk_backend.loaded) {
         if (p->images) {
             for (uint32_t i = 0; i < p->count; i++) {
@@ -1596,8 +1562,7 @@ static void vk_destroy_pending_pool_inplace(waywallen_display_t *d,
         if (p->semaphores) {
             for (uint32_t i = 0; i < p->count; i++) {
                 if (p->semaphores[i] != VK_NULL_HANDLE) {
-                    d->vk_backend.vkDestroySemaphore(
-                        d->vk_backend.device, p->semaphores[i], NULL);
+                    d->vk_backend.vkDestroySemaphore(d->vk_backend.device, p->semaphores[i], NULL);
                 }
             }
         }
@@ -1609,19 +1574,17 @@ static void vk_destroy_pending_pool_inplace(waywallen_display_t *d,
 /* Move the current Vulkan pool onto the pending-destroy queue. Runs
  * on the I/O thread; deferred destruction is what closes the race
  * with the host's render-thread vkQueueSubmit. */
-static void vk_release_current_pool(waywallen_display_t *d) {
-    if (d->vk_import_count == 0
-        || (!d->vk_images && !d->vk_semaphores)) {
+static void vk_release_current_pool(waywallen_display_t* d) {
+    if (d->vk_import_count == 0 || (! d->vk_images && ! d->vk_semaphores)) {
         free(d->vk_images);
         free(d->vk_semaphores);
-        d->vk_images = NULL;
-        d->vk_semaphores = NULL;
+        d->vk_images       = NULL;
+        d->vk_semaphores   = NULL;
         d->vk_import_count = 0;
         return;
     }
-    struct ww_vk_pending_pool *p =
-        (struct ww_vk_pending_pool *)calloc(1, sizeof(*p));
-    if (!p) {
+    struct ww_vk_pending_pool* p = (struct ww_vk_pending_pool*)calloc(1, sizeof(*p));
+    if (! p) {
         /* Same fallback rationale as the EGL path: leaking the imports
          * is preferable to destroying them on the wrong thread, where
          * vkDestroyImage may race with an in-flight vkQueueSubmit. */
@@ -1631,41 +1594,42 @@ static void vk_release_current_pool(waywallen_display_t *d) {
                d->vk_import_count);
         free(d->vk_images);
         free(d->vk_semaphores);
-        d->vk_images = NULL;
-        d->vk_semaphores = NULL;
+        d->vk_images       = NULL;
+        d->vk_semaphores   = NULL;
         d->vk_import_count = 0;
         return;
     }
-    p->images = d->vk_images;
-    p->semaphores = d->vk_semaphores;
-    p->count = d->vk_import_count;
-    d->vk_images = NULL;
-    d->vk_semaphores = NULL;
+    p->images          = d->vk_images;
+    p->semaphores      = d->vk_semaphores;
+    p->count           = d->vk_import_count;
+    d->vk_images       = NULL;
+    d->vk_semaphores   = NULL;
     d->vk_import_count = 0;
 
     pthread_mutex_lock(&d->pending_mutex);
-    p->next = d->vk_pending;
+    p->next       = d->vk_pending;
     d->vk_pending = p;
-    unsigned len = 0;
-    for (struct ww_vk_pending_pool *cur = d->vk_pending; cur; cur = cur->next) len++;
+    unsigned len  = 0;
+    for (struct ww_vk_pending_pool* cur = d->vk_pending; cur; cur = cur->next) len++;
     pthread_mutex_unlock(&d->pending_mutex);
     if (len > 4) {
         ww_log(WAYWALLEN_LOG_WARN,
                "vk pending pool list grew to %u — host render thread "
-               "is not draining", len);
+               "is not draining",
+               len);
     }
 }
 #endif
 
-int waywallen_display_drain(waywallen_display_t *d) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_drain(waywallen_display_t* d) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
     int drained = 0;
 
 #ifdef WW_HAVE_VULKAN
-    struct ww_vk_pending_pool *vk_head = NULL;
+    struct ww_vk_pending_pool* vk_head = NULL;
 #endif
 #ifdef WW_HAVE_EGL
-    struct ww_egl_pending_pool *egl_head = NULL;
+    struct ww_egl_pending_pool* egl_head = NULL;
 #endif
 
     /* Snapshot both lists under the lock, then destroy outside it so
@@ -1673,18 +1637,18 @@ int waywallen_display_drain(waywallen_display_t *d) {
      * next push. */
     pthread_mutex_lock(&d->pending_mutex);
 #ifdef WW_HAVE_VULKAN
-    vk_head = d->vk_pending;
+    vk_head       = d->vk_pending;
     d->vk_pending = NULL;
 #endif
 #ifdef WW_HAVE_EGL
-    egl_head = d->egl_pending;
+    egl_head       = d->egl_pending;
     d->egl_pending = NULL;
 #endif
     pthread_mutex_unlock(&d->pending_mutex);
 
 #ifdef WW_HAVE_VULKAN
     while (vk_head) {
-        struct ww_vk_pending_pool *next = vk_head->next;
+        struct ww_vk_pending_pool* next = vk_head->next;
         vk_destroy_pending_pool_inplace(d, vk_head);
         free(vk_head);
         vk_head = next;
@@ -1693,7 +1657,7 @@ int waywallen_display_drain(waywallen_display_t *d) {
 #endif
 #ifdef WW_HAVE_EGL
     while (egl_head) {
-        struct ww_egl_pending_pool *next = egl_head->next;
+        struct ww_egl_pending_pool* next = egl_head->next;
         egl_destroy_pending_pool_inplace(d, egl_head);
         free(egl_head);
         egl_head = next;
@@ -1703,8 +1667,8 @@ int waywallen_display_drain(waywallen_display_t *d) {
     return drained;
 }
 
-static void fire_textures_releasing_if_any(waywallen_display_t *d) {
-    if (!d->has_textures) return;
+static void fire_textures_releasing_if_any(waywallen_display_t* d) {
+    if (! d->has_textures) return;
     if (d->cb.on_textures_releasing) {
         d->cb.on_textures_releasing(d->cb.user_data, &d->current_textures);
     }
@@ -1720,7 +1684,7 @@ static void fire_textures_releasing_if_any(waywallen_display_t *d) {
     memset(&d->current_textures, 0, sizeof(d->current_textures));
     /* Re-arm the sentinel after the memset zeroes it. */
     d->current_textures.shadow_dmabuf_fd = -1;
-    d->has_textures = false;
+    d->has_textures                      = false;
 }
 
 #ifdef WW_HAVE_EGL
@@ -1733,27 +1697,24 @@ static void fire_textures_releasing_if_any(waywallen_display_t *d) {
  * the fds are closed by this function before return — the EGL
  * driver has dup2'd them internally.
  */
-static int try_egl_import(waywallen_display_t *d,
-                          const ww_evt_bind_buffers_t *bb,
-                          int *fd_buf, size_t n_fds) {
-    if (!d->egl_backend.loaded) return -ENOSYS;
-    if (bb->planes_per_buffer == 0
-        || bb->planes_per_buffer > WW_EGL_MAX_PLANES) {
+static int try_egl_import(waywallen_display_t* d, const ww_evt_bind_buffers_t* bb, int* fd_buf,
+                          size_t n_fds) {
+    if (! d->egl_backend.loaded) return -ENOSYS;
+    if (bb->planes_per_buffer == 0 || bb->planes_per_buffer > WW_EGL_MAX_PLANES) {
         return -EINVAL;
     }
     if (bb->count == 0) return -EINVAL;
-    if (bb->stride.count != n_fds
-        || bb->plane_offset.count != n_fds) {
+    if (bb->stride.count != n_fds || bb->plane_offset.count != n_fds) {
         return -EINVAL;
     }
 
     d->egl_import_count = 0;
-    d->egl_images = (void **)calloc(bb->count, sizeof(void *));
-    d->egl_gl_textures = (uint32_t *)calloc(bb->count, sizeof(uint32_t));
-    if (!d->egl_images || !d->egl_gl_textures) {
+    d->egl_images       = (void**)calloc(bb->count, sizeof(void*));
+    d->egl_gl_textures  = (uint32_t*)calloc(bb->count, sizeof(uint32_t));
+    if (! d->egl_images || ! d->egl_gl_textures) {
         free(d->egl_images);
         free(d->egl_gl_textures);
-        d->egl_images = NULL;
+        d->egl_images      = NULL;
         d->egl_gl_textures = NULL;
         return -ENOMEM;
     }
@@ -1762,33 +1723,33 @@ static int try_egl_import(waywallen_display_t *d,
         ww_egl_dmabuf_import_t im;
         memset(&im, 0, sizeof(im));
         im.egl_display = d->egl.egl_display;
-        im.fourcc = bb->fourcc;
-        im.width = bb->width;
-        im.height = bb->height;
-        im.modifier = bb->modifier;
-        im.n_planes = bb->planes_per_buffer;
+        im.fourcc      = bb->fourcc;
+        im.width       = bb->width;
+        im.height      = bb->height;
+        im.modifier    = bb->modifier;
+        im.n_planes    = bb->planes_per_buffer;
         for (uint32_t p = 0; p < bb->planes_per_buffer; p++) {
-            size_t idx = (size_t)b * bb->planes_per_buffer + p;
-            im.fds[p] = fd_buf[idx];
+            size_t idx    = (size_t)b * bb->planes_per_buffer + p;
+            im.fds[p]     = fd_buf[idx];
             im.strides[p] = bb->stride.data[idx];
             im.offsets[p] = bb->plane_offset.data[idx];
         }
         EGLImageKHR img;
-        int rc = ww_egl_import_dmabuf(&d->egl_backend, &im, &img);
+        int         rc = ww_egl_import_dmabuf(&d->egl_backend, &im, &img);
         if (rc != 0) {
             for (uint32_t j = 0; j < b; j++) {
                 if (d->egl_images[j]) {
-                    ww_egl_destroy_image(&d->egl_backend, d->egl.egl_display,
-                                         (EGLImageKHR)d->egl_images[j]);
+                    ww_egl_destroy_image(
+                        &d->egl_backend, d->egl.egl_display, (EGLImageKHR)d->egl_images[j]);
                 }
             }
             free(d->egl_images);
             free(d->egl_gl_textures);
-            d->egl_images = NULL;
+            d->egl_images      = NULL;
             d->egl_gl_textures = NULL;
             return rc;
         }
-        d->egl_images[b] = (void *)img;
+        d->egl_images[b] = (void*)img;
         /* GL texture creation is deferred to the host's render thread
          * via waywallen_display_create_gl_texture(). */
     }
@@ -1797,27 +1758,23 @@ static int try_egl_import(waywallen_display_t *d,
     close_all_fds(fd_buf, n_fds);
     return 0;
 }
-#endif  /* WW_HAVE_EGL */
+#endif /* WW_HAVE_EGL */
 
 #ifdef WW_HAVE_VULKAN
-static int try_vk_import(waywallen_display_t *d,
-                         const ww_evt_bind_buffers_t *bb,
-                         int *fd_buf, size_t n_fds) {
-    if (!d->vk_backend.loaded) return -ENOSYS;
-    if (bb->planes_per_buffer == 0
-        || bb->planes_per_buffer > WW_VK_MAX_PLANES) return -EINVAL;
+static int try_vk_import(waywallen_display_t* d, const ww_evt_bind_buffers_t* bb, int* fd_buf,
+                         size_t n_fds) {
+    if (! d->vk_backend.loaded) return -ENOSYS;
+    if (bb->planes_per_buffer == 0 || bb->planes_per_buffer > WW_VK_MAX_PLANES) return -EINVAL;
     if (bb->count == 0) return -EINVAL;
-    if (bb->stride.count != n_fds || bb->plane_offset.count != n_fds)
-        return -EINVAL;
+    if (bb->stride.count != n_fds || bb->plane_offset.count != n_fds) return -EINVAL;
 
     d->vk_import_count = 0;
-    d->vk_images = (ww_vk_imported_image_t *)calloc(
-        bb->count, sizeof(ww_vk_imported_image_t));
-    d->vk_semaphores = (VkSemaphore *)calloc(bb->count, sizeof(VkSemaphore));
-    if (!d->vk_images || !d->vk_semaphores) {
+    d->vk_images       = (ww_vk_imported_image_t*)calloc(bb->count, sizeof(ww_vk_imported_image_t));
+    d->vk_semaphores   = (VkSemaphore*)calloc(bb->count, sizeof(VkSemaphore));
+    if (! d->vk_images || ! d->vk_semaphores) {
         free(d->vk_images);
         free(d->vk_semaphores);
-        d->vk_images = NULL;
+        d->vk_images     = NULL;
         d->vk_semaphores = NULL;
         return -ENOMEM;
     }
@@ -1827,22 +1784,22 @@ static int try_vk_import(waywallen_display_t *d,
         VkSemaphoreCreateInfo sci = {
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
         };
-        VkResult vr = d->vk_backend.vkCreateSemaphore(
-            d->vk_backend.device, &sci, NULL, &d->vk_semaphores[b]);
+        VkResult vr =
+            d->vk_backend.vkCreateSemaphore(d->vk_backend.device, &sci, NULL, &d->vk_semaphores[b]);
         if (vr != VK_SUCCESS) goto rollback;
     }
 
     for (uint32_t b = 0; b < bb->count; b++) {
         ww_vk_dmabuf_import_t im;
         memset(&im, 0, sizeof(im));
-        im.fourcc = bb->fourcc;
-        im.width = bb->width;
-        im.height = bb->height;
+        im.fourcc   = bb->fourcc;
+        im.width    = bb->width;
+        im.height   = bb->height;
         im.modifier = bb->modifier;
         im.n_planes = bb->planes_per_buffer;
         for (uint32_t p = 0; p < bb->planes_per_buffer; p++) {
-            size_t idx = (size_t)b * bb->planes_per_buffer + p;
-            im.fds[p] = fd_buf[idx];
+            size_t idx    = (size_t)b * bb->planes_per_buffer + p;
+            im.fds[p]     = fd_buf[idx];
             im.strides[p] = bb->stride.data[idx];
             im.offsets[p] = bb->plane_offset.data[idx];
         }
@@ -1865,21 +1822,19 @@ rollback:
     for (uint32_t j = 0; j < bb->count; j++) {
         ww_vk_destroy_imported_image(&d->vk_backend, &d->vk_images[j]);
         if (d->vk_semaphores[j] != VK_NULL_HANDLE) {
-            d->vk_backend.vkDestroySemaphore(
-                d->vk_backend.device, d->vk_semaphores[j], NULL);
+            d->vk_backend.vkDestroySemaphore(d->vk_backend.device, d->vk_semaphores[j], NULL);
         }
     }
     free(d->vk_images);
     free(d->vk_semaphores);
-    d->vk_images = NULL;
+    d->vk_images     = NULL;
     d->vk_semaphores = NULL;
     return -EIO;
 }
-#endif  /* WW_HAVE_VULKAN */
+#endif /* WW_HAVE_VULKAN */
 
-static int handle_bind_buffers(waywallen_display_t *d,
-                               const uint8_t *body, size_t body_len,
-                               int *fd_buf, size_t n_fds) {
+static int handle_bind_buffers(waywallen_display_t* d, const uint8_t* body, size_t body_len,
+                               int* fd_buf, size_t n_fds) {
     /* Close any prior texture state first. */
     fire_textures_releasing_if_any(d);
 
@@ -1896,55 +1851,65 @@ static int handle_bind_buffers(waywallen_display_t *d,
     ww_log(WAYWALLEN_LOG_INFO,
            "bind_buffers received gen=%" PRIu64 " count=%u %ux%u "
            "fourcc=0x%08x modifier=0x%" PRIx64 " planes_per_buffer=%u",
-           bb.buffer_generation, bb.count, bb.width, bb.height,
-           bb.fourcc, bb.modifier, bb.planes_per_buffer);
+           bb.buffer_generation,
+           bb.count,
+           bb.width,
+           bb.height,
+           bb.fourcc,
+           bb.modifier,
+           bb.planes_per_buffer);
     uint32_t expected = bb.count * bb.planes_per_buffer;
     if ((size_t)expected != n_fds) {
         close_all_fds(fd_buf, n_fds);
         ww_evt_bind_buffers_free(&bb);
-        fire_disconnected(d, WAYWALLEN_ERR_PROTO,
-                          "bind_buffers fd count mismatch");
+        fire_disconnected(d, WAYWALLEN_ERR_PROTO, "bind_buffers fd count mismatch");
         return WAYWALLEN_ERR_PROTO;
     }
 
-    waywallen_backend_t reported_backend = WAYWALLEN_BACKEND_NONE;
-    void **reported_egl_images = NULL;
-    uint32_t *reported_gl_textures = NULL;
-    void **reported_vk_images = NULL;
-    void **reported_vk_memories = NULL;
-    int fds_consumed = 0;
+    waywallen_backend_t reported_backend     = WAYWALLEN_BACKEND_NONE;
+    void**              reported_egl_images  = NULL;
+    uint32_t*           reported_gl_textures = NULL;
+    void**              reported_vk_images   = NULL;
+    void**              reported_vk_memories = NULL;
+    int                 fds_consumed         = 0;
 
 #ifdef WW_HAVE_EGL
-    if (!fds_consumed && d->backend == WAYWALLEN_BACKEND_EGL
-        && d->egl_backend.loaded) {
+    if (! fds_consumed && d->backend == WAYWALLEN_BACKEND_EGL && d->egl_backend.loaded) {
         int ir = try_egl_import(d, &bb, fd_buf, n_fds);
         if (ir == 0) {
-            ww_log(WAYWALLEN_LOG_INFO, "EGL import: %u images, %ux%u fourcc=0x%x",
-                   bb.count, bb.width, bb.height, bb.fourcc);
-            reported_backend = WAYWALLEN_BACKEND_EGL;
+            ww_log(WAYWALLEN_LOG_INFO,
+                   "EGL import: %u images, %ux%u fourcc=0x%x",
+                   bb.count,
+                   bb.width,
+                   bb.height,
+                   bb.fourcc);
+            reported_backend    = WAYWALLEN_BACKEND_EGL;
             reported_egl_images = d->egl_images;
-            fds_consumed = 1;
+            fds_consumed        = 1;
         } else {
             ww_log(WAYWALLEN_LOG_WARN, "EGL import failed: %d", ir);
         }
     }
 #endif
 #ifdef WW_HAVE_VULKAN
-    if (!fds_consumed && d->backend == WAYWALLEN_BACKEND_VULKAN
-        && d->vk_backend.loaded) {
+    if (! fds_consumed && d->backend == WAYWALLEN_BACKEND_VULKAN && d->vk_backend.loaded) {
         int ir = try_vk_import(d, &bb, fd_buf, n_fds);
         if (ir == 0) {
-            ww_log(WAYWALLEN_LOG_INFO, "Vulkan import: %u images, %ux%u fourcc=0x%x",
-                   bb.count, bb.width, bb.height, bb.fourcc);
+            ww_log(WAYWALLEN_LOG_INFO,
+                   "Vulkan import: %u images, %ux%u fourcc=0x%x",
+                   bb.count,
+                   bb.width,
+                   bb.height,
+                   bb.fourcc);
             reported_backend = WAYWALLEN_BACKEND_VULKAN;
             /* Build void* arrays pointing into the imported image
              * structs so the callback payload matches the public API. */
-            reported_vk_images = (void **)calloc(bb.count, sizeof(void *));
-            reported_vk_memories = (void **)calloc(bb.count, sizeof(void *));
+            reported_vk_images   = (void**)calloc(bb.count, sizeof(void*));
+            reported_vk_memories = (void**)calloc(bb.count, sizeof(void*));
             if (reported_vk_images && reported_vk_memories) {
                 for (uint32_t i = 0; i < bb.count; i++) {
-                    reported_vk_images[i] = (void *)d->vk_images[i].image;
-                    reported_vk_memories[i] = (void *)d->vk_images[i].memory;
+                    reported_vk_images[i]   = (void*)d->vk_images[i].image;
+                    reported_vk_memories[i] = (void*)d->vk_images[i].memory;
                 }
             }
             fds_consumed = 1;
@@ -1952,25 +1917,22 @@ static int handle_bind_buffers(waywallen_display_t *d,
             ww_log(WAYWALLEN_LOG_WARN, "Vulkan import failed: %d", ir);
         }
     }
-    if (!fds_consumed && d->backend == WAYWALLEN_BACKEND_DMABUF_RELAY
-        && d->vk_backend.loaded) {
+    if (! fds_consumed && d->backend == WAYWALLEN_BACKEND_DMABUF_RELAY && d->vk_backend.loaded) {
         int ir = try_vk_import(d, &bb, fd_buf, n_fds);
         if (ir == 0) {
             VkFormat shadow_fmt = ww_fourcc_to_vk_format(bb.fourcc);
-            int sr = ww_vk_blitter_ensure_shadow_exportable(
+            int      sr         = ww_vk_blitter_ensure_shadow_exportable(
                 &d->vk_blitter, bb.width, bb.height, shadow_fmt);
             if (sr == 0) {
-                int sfd = -1;
-                uint32_t sn = 0;
-                uint32_t sstr[WAYWALLEN_DMABUF_MAX_PLANES] = {0};
-                uint64_t soff[WAYWALLEN_DMABUF_MAX_PLANES] = {0};
-                uint64_t smod = 0;
-                if (ww_vk_blitter_get_export(&d->vk_blitter, &sfd, &sn,
-                                              sstr, soff, &smod) == 0) {
+                int      sfd                               = -1;
+                uint32_t sn                                = 0;
+                uint32_t sstr[WAYWALLEN_DMABUF_MAX_PLANES] = { 0 };
+                uint64_t soff[WAYWALLEN_DMABUF_MAX_PLANES] = { 0 };
+                uint64_t smod                              = 0;
+                if (ww_vk_blitter_get_export(&d->vk_blitter, &sfd, &sn, sstr, soff, &smod) == 0) {
                     d->current_textures.shadow_dmabuf_fd = sfd;
                     d->current_textures.shadow_n_planes  = sn;
-                    for (uint32_t i = 0;
-                         i < sn && i < WAYWALLEN_DMABUF_MAX_PLANES; i++) {
+                    for (uint32_t i = 0; i < sn && i < WAYWALLEN_DMABUF_MAX_PLANES; i++) {
                         d->current_textures.shadow_strides[i] = sstr[i];
                         d->current_textures.shadow_offsets[i] = soff[i];
                     }
@@ -1978,37 +1940,38 @@ static int handle_bind_buffers(waywallen_display_t *d,
                 }
                 ww_log(WAYWALLEN_LOG_INFO,
                        "dmabuf_relay: shadow ready %ux%u fourcc=0x%x fd=%d",
-                       bb.width, bb.height, bb.fourcc, sfd);
+                       bb.width,
+                       bb.height,
+                       bb.fourcc,
+                       sfd);
                 reported_backend = WAYWALLEN_BACKEND_DMABUF_RELAY;
-                fds_consumed = 1;
+                fds_consumed     = 1;
             } else {
-                ww_log(WAYWALLEN_LOG_WARN,
-                       "dmabuf_relay: ensure_shadow_exportable failed: %d", sr);
+                ww_log(WAYWALLEN_LOG_WARN, "dmabuf_relay: ensure_shadow_exportable failed: %d", sr);
             }
         } else {
-            ww_log(WAYWALLEN_LOG_WARN,
-                   "dmabuf_relay: producer import failed: %d", ir);
+            ww_log(WAYWALLEN_LOG_WARN, "dmabuf_relay: producer import failed: %d", ir);
         }
     }
 #endif
-    if (!fds_consumed) {
+    if (! fds_consumed) {
         ww_log(WAYWALLEN_LOG_WARN, "no backend imported buffers");
         close_all_fds(fd_buf, n_fds);
     }
 
-    d->current_buffer_generation = bb.buffer_generation;
-    d->current_textures.count = bb.count;
-    d->current_textures.tex_width = bb.width;
-    d->current_textures.tex_height = bb.height;
-    d->current_textures.fourcc = bb.fourcc;
-    d->current_textures.modifier = bb.modifier;
+    d->current_buffer_generation          = bb.buffer_generation;
+    d->current_textures.count             = bb.count;
+    d->current_textures.tex_width         = bb.width;
+    d->current_textures.tex_height        = bb.height;
+    d->current_textures.fourcc            = bb.fourcc;
+    d->current_textures.modifier          = bb.modifier;
     d->current_textures.planes_per_buffer = bb.planes_per_buffer;
-    d->current_textures.backend = reported_backend;
-    d->current_textures.egl_images = reported_egl_images;
-    d->current_textures.gl_textures = reported_gl_textures;
-    d->current_textures.vk_images = reported_vk_images;
-    d->current_textures.vk_memories = reported_vk_memories;
-    d->has_textures = true;
+    d->current_textures.backend           = reported_backend;
+    d->current_textures.egl_images        = reported_egl_images;
+    d->current_textures.gl_textures       = reported_gl_textures;
+    d->current_textures.vk_images         = reported_vk_images;
+    d->current_textures.vk_memories       = reported_vk_memories;
+    d->has_textures                       = true;
 
     ww_evt_bind_buffers_free(&bb);
     d->stream = WW_STREAM_ACTIVE;
@@ -2019,8 +1982,7 @@ static int handle_bind_buffers(waywallen_display_t *d,
     return WAYWALLEN_OK;
 }
 
-static int handle_set_config(waywallen_display_t *d,
-                             const uint8_t *body, size_t body_len) {
+static int handle_set_config(waywallen_display_t* d, const uint8_t* body, size_t body_len) {
     ww_evt_set_config_t sc;
     if (ww_evt_set_config_decode(body, body_len, &sc) != WW_OK) {
         fire_disconnected(d, WAYWALLEN_ERR_PROTO, "decode set_config");
@@ -2029,20 +1991,19 @@ static int handle_set_config(waywallen_display_t *d,
     /* Only valid after bind_buffers. */
     if (d->stream != WW_STREAM_ACTIVE) {
         ww_evt_set_config_free(&sc);
-        fire_disconnected(d, WAYWALLEN_ERR_PROTO,
-                          "set_config in invalid state");
+        fire_disconnected(d, WAYWALLEN_ERR_PROTO, "set_config in invalid state");
         return WAYWALLEN_ERR_PROTO;
     }
     waywallen_config_t cfg;
-    cfg.source_rect.x = sc.source_rect.x;
-    cfg.source_rect.y = sc.source_rect.y;
-    cfg.source_rect.w = sc.source_rect.w;
-    cfg.source_rect.h = sc.source_rect.h;
-    cfg.dest_rect.x = sc.dest_rect.x;
-    cfg.dest_rect.y = sc.dest_rect.y;
-    cfg.dest_rect.w = sc.dest_rect.w;
-    cfg.dest_rect.h = sc.dest_rect.h;
-    cfg.transform = sc.transform;
+    cfg.source_rect.x  = sc.source_rect.x;
+    cfg.source_rect.y  = sc.source_rect.y;
+    cfg.source_rect.w  = sc.source_rect.w;
+    cfg.source_rect.h  = sc.source_rect.h;
+    cfg.dest_rect.x    = sc.dest_rect.x;
+    cfg.dest_rect.y    = sc.dest_rect.y;
+    cfg.dest_rect.w    = sc.dest_rect.w;
+    cfg.dest_rect.h    = sc.dest_rect.h;
+    cfg.transform      = sc.transform;
     cfg.clear_color[0] = sc.clear_r;
     cfg.clear_color[1] = sc.clear_g;
     cfg.clear_color[2] = sc.clear_b;
@@ -2057,9 +2018,8 @@ static int handle_set_config(waywallen_display_t *d,
     return WAYWALLEN_OK;
 }
 
-static int handle_frame_ready(waywallen_display_t *d,
-                              const uint8_t *body, size_t body_len,
-                              int *fd_buf, size_t n_fds) {
+static int handle_frame_ready(waywallen_display_t* d, const uint8_t* body, size_t body_len,
+                              int* fd_buf, size_t n_fds) {
     ww_evt_frame_ready_t fr;
     if (ww_evt_frame_ready_decode(body, body_len, &fr) != WW_OK) {
         close_all_fds(fd_buf, n_fds);
@@ -2070,18 +2030,16 @@ static int handle_frame_ready(waywallen_display_t *d,
     if (n_fds != 2) {
         close_all_fds(fd_buf, n_fds);
         ww_evt_frame_ready_free(&fr);
-        fire_disconnected(d, WAYWALLEN_ERR_PROTO,
-                          "frame_ready expected 2 fds");
+        fire_disconnected(d, WAYWALLEN_ERR_PROTO, "frame_ready expected 2 fds");
         return WAYWALLEN_ERR_PROTO;
     }
-    int acquire_fd = fd_buf[0];
+    int acquire_fd         = fd_buf[0];
     int release_syncobj_fd = fd_buf[1];
     if (d->stream != WW_STREAM_ACTIVE) {
         close(acquire_fd);
         close(release_syncobj_fd);
         ww_evt_frame_ready_free(&fr);
-        fire_disconnected(d, WAYWALLEN_ERR_PROTO,
-                          "frame_ready in wrong state");
+        fire_disconnected(d, WAYWALLEN_ERR_PROTO, "frame_ready in wrong state");
         return WAYWALLEN_ERR_PROTO;
     }
     /* Drop stale-generation frames silently. */
@@ -2092,14 +2050,12 @@ static int handle_frame_ready(waywallen_display_t *d,
         return WAYWALLEN_OK;
     }
 
-    int fd_handled = 0;
-    void *acquire_semaphore = NULL;
+    int   fd_handled        = 0;
+    void* acquire_semaphore = NULL;
 
 #ifdef WW_HAVE_EGL
-    if (!fd_handled && d->backend == WAYWALLEN_BACKEND_EGL
-        && d->egl_backend.loaded) {
-        int rc = ww_egl_wait_sync_fd(&d->egl_backend, d->egl.egl_display,
-                                     acquire_fd);
+    if (! fd_handled && d->backend == WAYWALLEN_BACKEND_EGL && d->egl_backend.loaded) {
+        int rc = ww_egl_wait_sync_fd(&d->egl_backend, d->egl.egl_display, acquire_fd);
         if (rc != 0) {
             close(acquire_fd);
         }
@@ -2107,15 +2063,13 @@ static int handle_frame_ready(waywallen_display_t *d,
     }
 #endif
 #ifdef WW_HAVE_VULKAN
-    if (!fd_handled && d->backend == WAYWALLEN_BACKEND_VULKAN
-        && d->vk_backend.loaded && d->vk_semaphores) {
+    if (! fd_handled && d->backend == WAYWALLEN_BACKEND_VULKAN && d->vk_backend.loaded &&
+        d->vk_semaphores) {
         uint32_t slot = fr.buffer_index;
         if (slot < d->vk_import_count && d->vk_semaphores[slot] != VK_NULL_HANDLE) {
-            int rc = ww_vk_import_sync_fd(&d->vk_backend,
-                                          d->vk_semaphores[slot],
-                                          acquire_fd);
+            int rc = ww_vk_import_sync_fd(&d->vk_backend, d->vk_semaphores[slot], acquire_fd);
             if (rc == 0) {
-                acquire_semaphore = (void *)d->vk_semaphores[slot];
+                acquire_semaphore = (void*)d->vk_semaphores[slot];
             } else {
                 close(acquire_fd);
             }
@@ -2124,16 +2078,12 @@ static int handle_frame_ready(waywallen_display_t *d,
         }
         fd_handled = 1;
     }
-    if (!fd_handled && d->backend == WAYWALLEN_BACKEND_DMABUF_RELAY
-        && d->vk_backend.loaded && d->vk_semaphores
-        && ww_vk_blitter_initialized(&d->vk_blitter)) {
-        uint32_t slot = fr.buffer_index;
+    if (! fd_handled && d->backend == WAYWALLEN_BACKEND_DMABUF_RELAY && d->vk_backend.loaded &&
+        d->vk_semaphores && ww_vk_blitter_initialized(&d->vk_blitter)) {
+        uint32_t    slot    = fr.buffer_index;
         VkSemaphore acq_sem = VK_NULL_HANDLE;
-        if (slot < d->vk_import_count
-            && d->vk_semaphores[slot] != VK_NULL_HANDLE) {
-            int rc = ww_vk_import_sync_fd(&d->vk_backend,
-                                          d->vk_semaphores[slot],
-                                          acquire_fd);
+        if (slot < d->vk_import_count && d->vk_semaphores[slot] != VK_NULL_HANDLE) {
+            int rc = ww_vk_import_sync_fd(&d->vk_backend, d->vk_semaphores[slot], acquire_fd);
             if (rc == 0) {
                 acq_sem = d->vk_semaphores[slot];
             } else {
@@ -2142,8 +2092,7 @@ static int handle_frame_ready(waywallen_display_t *d,
         } else {
             close(acquire_fd);
         }
-        if (slot < d->vk_import_count
-            && d->vk_images[slot].image != VK_NULL_HANDLE) {
+        if (slot < d->vk_import_count && d->vk_images[slot].image != VK_NULL_HANDLE) {
             /* Blit consumes release_syncobj_fd (signals + close) on its
              * own success/failure paths — pass ownership through. */
             (void)ww_vk_blitter_blit(&d->vk_blitter,
@@ -2159,16 +2108,16 @@ static int handle_frame_ready(waywallen_display_t *d,
         /* The lib already drove sync to completion; host sees no sem +
          * no release fd to deal with. */
         release_syncobj_fd = -1;
-        fd_handled = 1;
+        fd_handled         = 1;
     }
 #endif
-    if (!fd_handled) {
+    if (! fd_handled) {
         close(acquire_fd);
     }
 
     waywallen_frame_t frame;
-    frame.buffer_index = fr.buffer_index;
-    frame.seq = fr.seq;
+    frame.buffer_index         = fr.buffer_index;
+    frame.seq                  = fr.seq;
     frame.vk_acquire_semaphore = acquire_semaphore;
     /* Hand the raw release_syncobj fd to the host. Ownership transfers:
      * the host MUST signal it from its release GPU work and then close.
@@ -2186,8 +2135,7 @@ static int handle_frame_ready(waywallen_display_t *d,
     return WAYWALLEN_OK;
 }
 
-static int handle_unbind(waywallen_display_t *d,
-                         const uint8_t *body, size_t body_len) {
+static int handle_unbind(waywallen_display_t* d, const uint8_t* body, size_t body_len) {
     ww_evt_unbind_t ub;
     if (ww_evt_unbind_decode(body, body_len, &ub) != WW_OK) {
         fire_disconnected(d, WAYWALLEN_ERR_PROTO, "decode unbind");
@@ -2209,28 +2157,27 @@ static int handle_unbind(waywallen_display_t *d,
     return WAYWALLEN_OK;
 }
 
-static int handle_error(waywallen_display_t *d,
-                        const uint8_t *body, size_t body_len) {
+static int handle_error(waywallen_display_t* d, const uint8_t* body, size_t body_len) {
     ww_evt_error_t er;
     if (ww_evt_error_decode(body, body_len, &er) != WW_OK) {
-        fire_disconnected_r(d, WAYWALLEN_DISCONNECT_DAEMON_ERROR,
-                            WAYWALLEN_ERR_PROTO, "decode error");
+        fire_disconnected_r(
+            d, WAYWALLEN_DISCONNECT_DAEMON_ERROR, WAYWALLEN_ERR_PROTO, "decode error");
         return WAYWALLEN_ERR_PROTO;
     }
     /* Make a local copy of the message before freeing `er`, then
      * fire the callback. */
-    char *msg = er.message;
+    char*    msg  = er.message;
     uint32_t code = er.code;
-    er.message = NULL;
+    er.message    = NULL;
     ww_evt_error_free(&er);
-    fire_disconnected_r(d, map_daemon_error_code(code),
-                        WAYWALLEN_ERR_PROTO, msg ? msg : "server error");
+    fire_disconnected_r(
+        d, map_daemon_error_code(code), WAYWALLEN_ERR_PROTO, msg ? msg : "server error");
     free(msg);
     return WAYWALLEN_ERR_PROTO;
 }
 
-int waywallen_display_dispatch(waywallen_display_t *d) {
-    if (!d) return WAYWALLEN_ERR_INVAL;
+int waywallen_display_dispatch(waywallen_display_t* d) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
     if (d->fd < 0 || d->conn == WW_CONN_DEAD) return WAYWALLEN_ERR_NOTCONN;
     if (d->conn == WW_CONN_DISCONNECTED) return WAYWALLEN_ERR_STATE;
 
@@ -2242,55 +2189,51 @@ int waywallen_display_dispatch(waywallen_display_t *d) {
      * such partial read into a spurious disconnect → respawn storm. */
     int rc = ww_codec_recv_partial(d->fd, &d->hs_recv);
     if (rc == WW_CODEC_FRAME_NEED)
-        return WAYWALLEN_OK;  /* 0 frames this round; level-triggered IN refires */
+        return WAYWALLEN_OK; /* 0 frames this round; level-triggered IN refires */
     if (rc < 0) {
-        int werr = (rc == -ECONNRESET) ? WAYWALLEN_ERR_NOTCONN
-                                       : WAYWALLEN_ERR_IO;
+        int werr = (rc == -ECONNRESET) ? WAYWALLEN_ERR_NOTCONN : WAYWALLEN_ERR_IO;
         fire_disconnected(d, werr, "recv event");
         flush_dead_event(d);
         return werr;
     }
 
-    uint16_t op = d->hs_recv.op;
-    uint8_t *body_buf = d->hs_recv.body;
-    size_t body_len = d->hs_recv.body_len;
-    int *fd_buf = d->hs_recv.fds;
-    size_t n_fds = d->hs_recv.n_fds;
-    int ret;
+    uint16_t op       = d->hs_recv.op;
+    uint8_t* body_buf = d->hs_recv.body;
+    size_t   body_len = d->hs_recv.body_len;
+    int*     fd_buf   = d->hs_recv.fds;
+    size_t   n_fds    = d->hs_recv.n_fds;
+    int      ret;
 
     switch (op) {
-        case WW_EVT_BIND_BUFFERS:
-            ret = handle_bind_buffers(d, body_buf, body_len, fd_buf, n_fds);
-            break;
-        case WW_EVT_SET_CONFIG:
-            close_all_fds(fd_buf, n_fds);
-            ret = handle_set_config(d, body_buf, body_len);
-            break;
-        case WW_EVT_FRAME_READY:
-            ret = handle_frame_ready(d, body_buf, body_len, fd_buf, n_fds);
-            break;
-        case WW_EVT_UNBIND:
-            close_all_fds(fd_buf, n_fds);
-            ret = handle_unbind(d, body_buf, body_len);
-            break;
-        case WW_EVT_ERROR:
-            close_all_fds(fd_buf, n_fds);
-            ret = handle_error(d, body_buf, body_len);
-            break;
-        case WW_EVT_WELCOME:
-        case WW_EVT_DISPLAY_ACCEPTED:
-            /* Legal only during handshake. Seeing them again is a
-             * protocol violation. */
-            close_all_fds(fd_buf, n_fds);
-            fire_disconnected(d, WAYWALLEN_ERR_PROTO,
-                              "unexpected handshake event");
-            ret = WAYWALLEN_ERR_PROTO;
-            break;
-        default:
-            /* Unknown opcodes are forward-compat: log + drop. */
-            close_all_fds(fd_buf, n_fds);
-            ret = WAYWALLEN_OK;
-            break;
+    case WW_EVT_BIND_BUFFERS:
+        ret = handle_bind_buffers(d, body_buf, body_len, fd_buf, n_fds);
+        break;
+    case WW_EVT_SET_CONFIG:
+        close_all_fds(fd_buf, n_fds);
+        ret = handle_set_config(d, body_buf, body_len);
+        break;
+    case WW_EVT_FRAME_READY: ret = handle_frame_ready(d, body_buf, body_len, fd_buf, n_fds); break;
+    case WW_EVT_UNBIND:
+        close_all_fds(fd_buf, n_fds);
+        ret = handle_unbind(d, body_buf, body_len);
+        break;
+    case WW_EVT_ERROR:
+        close_all_fds(fd_buf, n_fds);
+        ret = handle_error(d, body_buf, body_len);
+        break;
+    case WW_EVT_WELCOME:
+    case WW_EVT_DISPLAY_ACCEPTED:
+        /* Legal only during handshake. Seeing them again is a
+         * protocol violation. */
+        close_all_fds(fd_buf, n_fds);
+        fire_disconnected(d, WAYWALLEN_ERR_PROTO, "unexpected handshake event");
+        ret = WAYWALLEN_ERR_PROTO;
+        break;
+    default:
+        /* Unknown opcodes are forward-compat: log + drop. */
+        close_all_fds(fd_buf, n_fds);
+        ret = WAYWALLEN_OK;
+        break;
     }
     /* Every switch branch consumes (imports or closes) the frame's fds,
      * so zero n_fds before reset — otherwise recv_state_reset's
@@ -2299,7 +2242,7 @@ int waywallen_display_dispatch(waywallen_display_t *d) {
      * Reset must precede flush_dead_event, which may free d. */
     d->hs_recv.n_fds = 0;
     ww_codec_recv_state_reset(&d->hs_recv);
-    flush_dead_event(d);  /* must be last; may free d */
+    flush_dead_event(d); /* must be last; may free d */
     return ret;
 }
 
@@ -2327,14 +2270,11 @@ struct ww_drm_syncobj_array {
 };
 
 #ifndef DRM_IOCTL_BASE
-#define DRM_IOCTL_BASE 'd'
+#    define DRM_IOCTL_BASE 'd'
 #endif
-#define WW_DRM_IOCTL_SYNCOBJ_DESTROY \
-    _IOWR(DRM_IOCTL_BASE, 0xC0, struct ww_drm_syncobj_destroy)
-#define WW_DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE \
-    _IOWR(DRM_IOCTL_BASE, 0xC2, struct ww_drm_syncobj_handle)
-#define WW_DRM_IOCTL_SYNCOBJ_SIGNAL \
-    _IOWR(DRM_IOCTL_BASE, 0xC5, struct ww_drm_syncobj_array)
+#define WW_DRM_IOCTL_SYNCOBJ_DESTROY      _IOWR(DRM_IOCTL_BASE, 0xC0, struct ww_drm_syncobj_destroy)
+#define WW_DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE _IOWR(DRM_IOCTL_BASE, 0xC2, struct ww_drm_syncobj_handle)
+#define WW_DRM_IOCTL_SYNCOBJ_SIGNAL       _IOWR(DRM_IOCTL_BASE, 0xC5, struct ww_drm_syncobj_array)
 
 /* Cached render-node fd. Opened lazily on first call; never closed
  * (process-lifetime). The kernel allows many concurrent open()s and
@@ -2374,11 +2314,11 @@ int waywallen_display_signal_release_syncobj(int fd) {
     }
     int rc = WAYWALLEN_OK;
     /* Signal the handle. */
-    uint32_t handles[1] = { imp.handle };
-    struct ww_drm_syncobj_array sig = {
-        .handles = (uintptr_t)handles,
+    uint32_t                    handles[1] = { imp.handle };
+    struct ww_drm_syncobj_array sig        = {
+        .handles       = (uintptr_t)handles,
         .count_handles = 1,
-        .pad = 0,
+        .pad           = 0,
     };
     if (ioctl(drm_fd, WW_DRM_IOCTL_SYNCOBJ_SIGNAL, &sig) != 0) {
         rc = WAYWALLEN_ERR_IO;
@@ -2393,8 +2333,8 @@ int waywallen_display_signal_release_syncobj(int fd) {
     return rc;
 }
 
-void waywallen_display_close(waywallen_display_t *d) {
-    if (!d) return;
+void waywallen_display_close(waywallen_display_t* d) {
+    if (! d) return;
     if (d->fd >= 0) {
         /* Best-effort bye; ignore errors. Only meaningful once the
          * connection is fully established — sending bye mid-handshake
@@ -2418,8 +2358,8 @@ void waywallen_display_close(waywallen_display_t *d) {
         ww_vk_destroy_owned(&d->vk_owned);
     }
 #endif
-    d->conn = WW_CONN_DISCONNECTED;
-    d->stream = WW_STREAM_INACTIVE;
+    d->conn     = WW_CONN_DISCONNECTED;
+    d->stream   = WW_STREAM_INACTIVE;
     d->hs_state = WW_HS_IDLE;
     ww_codec_recv_state_reset(&d->hs_recv);
     d->out_len = 0;
@@ -2427,11 +2367,11 @@ void waywallen_display_close(waywallen_display_t *d) {
     /* Drop any latched dead-event — host called us, we don't want to
      * fire on_disconnected back at them. */
     d->dead_event_pending = false;
-    d->dead_err = 0;
+    d->dead_err           = 0;
 }
 
-void waywallen_display_shutdown(waywallen_display_t *d) {
-    if (!d) return;
+void waywallen_display_shutdown(waywallen_display_t* d) {
+    if (! d) return;
     waywallen_display_close(d);
     /* Drain in a bounded loop. Each iteration destroys whatever pools
      * the previous bind_buffers handler queued; in practice 1 pass is
@@ -2452,30 +2392,28 @@ void waywallen_display_shutdown(waywallen_display_t *d) {
 /*  State queries                                                      */
 /* ------------------------------------------------------------------ */
 
-waywallen_conn_state_t waywallen_display_conn_state(waywallen_display_t *d) {
-    if (!d) return WAYWALLEN_CONN_DISCONNECTED;
+waywallen_conn_state_t waywallen_display_conn_state(waywallen_display_t* d) {
+    if (! d) return WAYWALLEN_CONN_DISCONNECTED;
     return (waywallen_conn_state_t)d->conn;
 }
 
-waywallen_stream_state_t waywallen_display_stream_state(waywallen_display_t *d) {
-    if (!d) return WAYWALLEN_STREAM_INACTIVE;
+waywallen_stream_state_t waywallen_display_stream_state(waywallen_display_t* d) {
+    if (! d) return WAYWALLEN_STREAM_INACTIVE;
     return (waywallen_stream_state_t)d->stream;
 }
 
-uint64_t waywallen_display_get_display_id(waywallen_display_t *d) {
-    if (!d) return 0;
+uint64_t waywallen_display_get_display_id(waywallen_display_t* d) {
+    if (! d) return 0;
     return d->display_id;
 }
 
-waywallen_disconnect_reason_t
-waywallen_display_last_disconnect_reason(waywallen_display_t *d) {
-    if (!d) return WAYWALLEN_DISCONNECT_NONE;
+waywallen_disconnect_reason_t waywallen_display_last_disconnect_reason(waywallen_display_t* d) {
+    if (! d) return WAYWALLEN_DISCONNECT_NONE;
     return d->last_reason;
 }
 
-const char *
-waywallen_display_last_disconnect_message(waywallen_display_t *d) {
-    if (!d) return "";
+const char* waywallen_display_last_disconnect_message(waywallen_display_t* d) {
+    if (! d) return "";
     return d->last_message;
 }
 
@@ -2483,17 +2421,13 @@ waywallen_display_last_disconnect_message(waywallen_display_t *d) {
 /*  EGL deferred GL texture creation                                   */
 /* ------------------------------------------------------------------ */
 
-int waywallen_display_create_gl_texture(waywallen_display_t *d,
-                                        uint32_t idx,
-                                        uint32_t *out_gl_texture) {
+int waywallen_display_create_gl_texture(waywallen_display_t* d, uint32_t idx,
+                                        uint32_t* out_gl_texture) {
 #ifdef WW_HAVE_EGL
-    if (!d || !out_gl_texture) return WAYWALLEN_ERR_INVAL;
-    if (d->backend != WAYWALLEN_BACKEND_EGL || !d->egl_backend.loaded)
-        return WAYWALLEN_ERR_STATE;
-    if (idx >= d->egl_import_count || !d->egl_images)
-        return WAYWALLEN_ERR_INVAL;
-    if (!d->egl_images[idx])
-        return WAYWALLEN_ERR_INVAL;
+    if (! d || ! out_gl_texture) return WAYWALLEN_ERR_INVAL;
+    if (d->backend != WAYWALLEN_BACKEND_EGL || ! d->egl_backend.loaded) return WAYWALLEN_ERR_STATE;
+    if (idx >= d->egl_import_count || ! d->egl_images) return WAYWALLEN_ERR_INVAL;
+    if (! d->egl_images[idx]) return WAYWALLEN_ERR_INVAL;
 
     /* Already created? Return the cached texture. */
     if (d->egl_gl_textures && d->egl_gl_textures[idx]) {
@@ -2502,9 +2436,7 @@ int waywallen_display_create_gl_texture(waywallen_display_t *d,
     }
 
     GLuint tex = 0;
-    int rc = ww_egl_texture_from_image(&d->egl_backend,
-                                        (EGLImageKHR)d->egl_images[idx],
-                                        &tex);
+    int    rc  = ww_egl_texture_from_image(&d->egl_backend, (EGLImageKHR)d->egl_images[idx], &tex);
     if (rc != 0) {
         ww_log(WAYWALLEN_LOG_WARN, "GL texture creation failed for image %u: %d", idx, rc);
         return WAYWALLEN_ERR_IO;
@@ -2512,25 +2444,27 @@ int waywallen_display_create_gl_texture(waywallen_display_t *d,
 
     ww_log(WAYWALLEN_LOG_DEBUG, "created GL texture %u for image %u", tex, idx);
     d->egl_gl_textures[idx] = tex;
-    *out_gl_texture = tex;
+    *out_gl_texture         = tex;
     return WAYWALLEN_OK;
 #else
-    (void)d; (void)idx; (void)out_gl_texture;
+    (void)d;
+    (void)idx;
+    (void)out_gl_texture;
     return WAYWALLEN_ERR_NOT_IMPL;
 #endif
 }
 
-void waywallen_display_delete_gl_texture(waywallen_display_t *d,
-                                         uint32_t idx) {
+void waywallen_display_delete_gl_texture(waywallen_display_t* d, uint32_t idx) {
 #ifdef WW_HAVE_EGL
-    if (!d || d->backend != WAYWALLEN_BACKEND_EGL) return;
-    if (!d->egl_backend.loaded) return;
+    if (! d || d->backend != WAYWALLEN_BACKEND_EGL) return;
+    if (! d->egl_backend.loaded) return;
     if (idx >= d->egl_import_count) return;
-    if (!d->egl_gl_textures || !d->egl_gl_textures[idx]) return;
+    if (! d->egl_gl_textures || ! d->egl_gl_textures[idx]) return;
 
     d->egl_backend.glDeleteTextures(1, &d->egl_gl_textures[idx]);
     d->egl_gl_textures[idx] = 0;
 #else
-    (void)d; (void)idx;
+    (void)d;
+    (void)idx;
 #endif
 }

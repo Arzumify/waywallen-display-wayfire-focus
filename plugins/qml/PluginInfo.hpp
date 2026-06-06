@@ -19,7 +19,7 @@ class PluginInfo : public QObject {
     Q_PROPERTY(QString version READ version CONSTANT)
 
 public:
-    explicit PluginInfo(QObject *parent = nullptr) : QObject(parent) {
+    explicit PluginInfo(QObject* parent = nullptr): QObject(parent) {
         m_v = waywallen_display_version();
     }
 
@@ -28,8 +28,7 @@ public:
     int versionPatch() const { return static_cast<int>(m_v.patch); }
 
     QString version() const {
-        return QStringLiteral("%1.%2.%3")
-            .arg(m_v.major).arg(m_v.minor).arg(m_v.patch);
+        return QStringLiteral("%1.%2.%3").arg(m_v.major).arg(m_v.minor).arg(m_v.patch);
     }
 
 private:

@@ -22,17 +22,17 @@
 
 #ifdef WW_HAVE_VULKAN
 
-#include <vulkan/vulkan.h>
+#    include <vulkan/vulkan.h>
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#    include <stdbool.h>
+#    include <stddef.h>
+#    include <stdint.h>
 
-#ifdef __cplusplus
+#    ifdef __cplusplus
 extern "C" {
-#endif
+#    endif
 
-#define WW_VK_MAX_PLANES 4
+#    define WW_VK_MAX_PLANES 4
 
 typedef struct ww_vk_backend {
     /* Resolved from the host's vkGetInstanceProcAddr. */
@@ -46,22 +46,22 @@ typedef struct ww_vk_backend {
     PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
 
     /* Device-level functions. */
-    PFN_vkCreateImage             vkCreateImage;
-    PFN_vkDestroyImage            vkDestroyImage;
+    PFN_vkCreateImage                vkCreateImage;
+    PFN_vkDestroyImage               vkDestroyImage;
     PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
-    PFN_vkAllocateMemory          vkAllocateMemory;
-    PFN_vkFreeMemory              vkFreeMemory;
-    PFN_vkBindImageMemory         vkBindImageMemory;
-    PFN_vkCreateSemaphore         vkCreateSemaphore;
-    PFN_vkDestroySemaphore        vkDestroySemaphore;
+    PFN_vkAllocateMemory             vkAllocateMemory;
+    PFN_vkFreeMemory                 vkFreeMemory;
+    PFN_vkBindImageMemory            vkBindImageMemory;
+    PFN_vkCreateSemaphore            vkCreateSemaphore;
+    PFN_vkDestroySemaphore           vkDestroySemaphore;
     /* Drained before tearing down imported VkImages / VkDeviceMemory
      * so the consumer's in-flight command buffers can't outlive their
      * resources (VUID-vkBindImageMemory-image-01445 /
      * BoundResourceFreedMemoryAccess). */
-    PFN_vkDeviceWaitIdle          vkDeviceWaitIdle;
+    PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
 
     /* Extension functions. */
-    PFN_vkGetMemoryFdPropertiesKHR  vkGetMemoryFdPropertiesKHR;
+    PFN_vkGetMemoryFdPropertiesKHR vkGetMemoryFdPropertiesKHR;
     PFN_vkImportSemaphoreFdKHR     vkImportSemaphoreFdKHR;
 
     /* Instance-level functions used for diagnostics. Resolved via
@@ -85,12 +85,12 @@ typedef struct ww_vk_backend {
     bool loaded;
 } ww_vk_backend_t;
 
-typedef void *(*ww_vk_get_instance_proc_addr_fn)(void *instance, const char *name);
+typedef void* (*ww_vk_get_instance_proc_addr_fn)(void* instance, const char* name);
 
 /* Stringify a VkResult for log lines. Covers the codes we actually
  * see across import / sync / blit paths; unknowns return "VK_<unknown>".
  * Stable strings — safe to embed in log format args directly. */
-const char *ww_vk_result_str(VkResult r);
+const char* ww_vk_result_str(VkResult r);
 
 /*
  * `install_debug_utils`: when true (and the host enabled
@@ -99,14 +99,11 @@ const char *ww_vk_result_str(VkResult r);
  * when another loaded backend on the same VkInstance already installed
  * one (e.g. the blitter sharing the host's instance with the library).
  */
-int  ww_vk_backend_load(ww_vk_backend_t *backend,
-                        VkInstance instance,
-                        VkPhysicalDevice physical_device,
-                        VkDevice device,
-                        uint32_t queue_family_index,
-                        ww_vk_get_instance_proc_addr_fn host_get_proc,
+int  ww_vk_backend_load(ww_vk_backend_t* backend, VkInstance instance,
+                        VkPhysicalDevice physical_device, VkDevice device,
+                        uint32_t queue_family_index, ww_vk_get_instance_proc_addr_fn host_get_proc,
                         bool install_debug_utils);
-void ww_vk_backend_unload(ww_vk_backend_t *backend);
+void ww_vk_backend_unload(ww_vk_backend_t* backend);
 
 /*
  * Look up the DRM render-node major/minor of `physical_device` via
@@ -120,9 +117,8 @@ void ww_vk_backend_unload(ww_vk_backend_t *backend);
  * info (drm property struct's `hasRender` bit is false). Callers should
  * treat any non-zero return as "unknown" and report `(0, 0)`.
  */
-int ww_vk_query_drm_render_node(const ww_vk_backend_t *backend,
-                                uint32_t *out_major,
-                                uint32_t *out_minor);
+int ww_vk_query_drm_render_node(const ww_vk_backend_t* backend, uint32_t* out_major,
+                                uint32_t* out_minor);
 
 /* ------------------------------------------------------------------ */
 /*  Format/modifier capability probe                                   */
@@ -132,10 +128,8 @@ int ww_vk_query_drm_render_node(const ww_vk_backend_t *backend,
  * Streaming emit callback used by `ww_vk_query_format_caps`. Signature
  * mirrors the EGL backend's; consumers can share a single accumulator.
  */
-typedef void (*ww_vk_caps_emit_fn)(uint32_t fourcc,
-                                   uint64_t modifier,
-                                   uint32_t plane_count,
-                                   void *user_data);
+typedef void (*ww_vk_caps_emit_fn)(uint32_t fourcc, uint64_t modifier, uint32_t plane_count,
+                                   void* user_data);
 
 /*
  * Enumerate (fourcc, modifier) pairs the physical device advertises
@@ -157,10 +151,8 @@ typedef void (*ww_vk_caps_emit_fn)(uint32_t fourcc,
  * resolved on the instance, or -errno from a failed query. On any
  * error `emit` is not invoked.
  */
-int ww_vk_query_format_caps(const ww_vk_backend_t *backend,
-                            uint32_t want_features,
-                            ww_vk_caps_emit_fn emit,
-                            void *user_data);
+int ww_vk_query_format_caps(const ww_vk_backend_t* backend, uint32_t want_features,
+                            ww_vk_caps_emit_fn emit, void* user_data);
 
 /*
  * Read the `VkPhysicalDeviceIDProperties` deviceUUID + driverUUID
@@ -168,8 +160,7 @@ int ww_vk_query_format_caps(const ww_vk_backend_t *backend,
  * 16-byte array. Returns 0 on success, -ENOSYS if
  * `vkGetPhysicalDeviceProperties2` is unavailable.
  */
-int ww_vk_query_device_uuid(const ww_vk_backend_t *backend,
-                            uint8_t out_device_uuid[16],
+int ww_vk_query_device_uuid(const ww_vk_backend_t* backend, uint8_t out_device_uuid[16],
                             uint8_t out_driver_uuid[16]);
 
 /*
@@ -189,8 +180,7 @@ int ww_vk_query_device_uuid(const ww_vk_backend_t *backend,
  * -ENOSYS if `vkGetPhysicalDeviceMemoryProperties` cannot be
  * resolved.
  */
-int ww_vk_query_supports_device_local(const ww_vk_backend_t *backend,
-                                      int *out_has_device_local);
+int ww_vk_query_supports_device_local(const ww_vk_backend_t* backend, int* out_has_device_local);
 
 /* ------------------------------------------------------------------ */
 /*  Library-owned Vulkan instance/device                                */
@@ -204,22 +194,22 @@ int ww_vk_query_supports_device_local(const ww_vk_backend_t *backend,
  * Output handles are owned by the caller — destroy via
  * `ww_vk_destroy_owned`. */
 typedef struct ww_vk_owned {
-    void                     *libvulkan;             /* dlopen handle */
+    void*                     libvulkan; /* dlopen handle */
     PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
     PFN_vkDestroyInstance     vkDestroyInstance;
     PFN_vkDestroyDevice       vkDestroyDevice;
-    VkInstance        instance;
-    VkPhysicalDevice  physical_device;
-    VkDevice          device;
-    uint32_t          queue_family_index;
-    VkQueue           queue;
+    VkInstance                instance;
+    VkPhysicalDevice          physical_device;
+    VkDevice                  device;
+    uint32_t                  queue_family_index;
+    VkQueue                   queue;
 } ww_vk_owned_t;
 
 /* Returns 0 on success, -ENOENT if libvulkan.so.1 cannot be loaded,
  * -ENOSYS if no suitable GPU/queue is found, -EIO on any other Vulkan
  * failure. Output struct is zeroed on failure. */
-int  ww_vk_create_owned(ww_vk_owned_t *out);
-void ww_vk_destroy_owned(ww_vk_owned_t *o);
+int  ww_vk_create_owned(ww_vk_owned_t* out);
+void ww_vk_destroy_owned(ww_vk_owned_t* o);
 
 /* Map a DRM fourcc to the VkFormat used by the lib-internal blitter +
  * shadow image path. Returns VK_FORMAT_UNDEFINED on unknown fourcc. */
@@ -243,11 +233,9 @@ typedef struct ww_vk_imported_image {
     VkDeviceMemory memory;
 } ww_vk_imported_image_t;
 
-int  ww_vk_import_dmabuf(const ww_vk_backend_t *backend,
-                         const ww_vk_dmabuf_import_t *import,
-                         ww_vk_imported_image_t *out);
-void ww_vk_destroy_imported_image(const ww_vk_backend_t *backend,
-                                  ww_vk_imported_image_t *img);
+int  ww_vk_import_dmabuf(const ww_vk_backend_t* backend, const ww_vk_dmabuf_import_t* import,
+                         ww_vk_imported_image_t* out);
+void ww_vk_destroy_imported_image(const ww_vk_backend_t* backend, ww_vk_imported_image_t* img);
 
 /* ------------------------------------------------------------------ */
 
@@ -263,13 +251,11 @@ void ww_vk_destroy_imported_image(const ww_vk_backend_t *backend,
  * On success: fd ownership transfers to the driver (closed by it).
  * On failure: caller retains the fd and must close it.
  */
-int ww_vk_import_sync_fd(const ww_vk_backend_t *backend,
-                         VkSemaphore sem,
-                         int sync_fd);
+int ww_vk_import_sync_fd(const ww_vk_backend_t* backend, VkSemaphore sem, int sync_fd);
 
-#ifdef __cplusplus
+#    ifdef __cplusplus
 }
-#endif
+#    endif
 
 #endif /* WW_HAVE_VULKAN */
 #endif /* WAYWALLEN_DISPLAY_BACKEND_VULKAN_H */
