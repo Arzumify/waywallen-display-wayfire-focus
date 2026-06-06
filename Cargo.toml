@@ -43,7 +43,7 @@ cc = "1"
 pkg-config = "0.3"
 
 [[bin]]
-name = "waywallen-display-layer-shell"
+name = "waywallen-layer-shell"
 path = "src/bin/layer_shell/main.rs"
 test = false
 required-features = ["layer-shell"]

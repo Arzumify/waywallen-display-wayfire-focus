@@ -1,4 +1,4 @@
-//! waywallen-display-layer-shell — Wayland layer-shell wallpaper client.
+//! waywallen-layer-shell — Wayland layer-shell wallpaper client.
 //!
 //! Connects to a Wayland compositor that supports `zwlr_layer_shell_v1`
 //! (Hyprland, Sway, Niri, River, …) and registers each output as a
@@ -1371,7 +1371,7 @@ fn present_shadow(binding: &OutputBinding) -> Result<()> {
 /// Blocks until the compositor disconnects or an unrecoverable error occurs.
 fn usage() -> ! {
     eprintln!(
-        "usage: waywallen-display-layer-shell [--socket PATH] [--name STR]\n\
+        "usage: waywallen-layer-shell [--socket PATH] [--name STR]\n\
          \n\
          Environment:\n\
            WAYWALLEN_SOCKET   fallback UDS path when --socket is omitted\n\
