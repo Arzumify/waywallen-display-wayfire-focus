@@ -18,8 +18,9 @@
 use core::ffi::{c_char, c_int, c_void};
 
 pub const WAYWALLEN_DISPLAY_VERSION_MAJOR: u32 = 0;
-pub const WAYWALLEN_DISPLAY_VERSION_MINOR: u32 = 1;
-pub const WAYWALLEN_DISPLAY_PROTOCOL_VERSION: u32 = 5;
+pub const WAYWALLEN_DISPLAY_VERSION_MINOR: u32 = 2;
+pub const WAYWALLEN_DISPLAY_VERSION_PATCH: u32 = 4;
+pub const WAYWALLEN_DISPLAY_PROTOCOL_VERSION: u32 = 7;
 
 // -----------------------------------------------------------------------------
 // Return codes
@@ -46,11 +47,7 @@ pub const WAYWALLEN_LOG_WARN: waywallen_log_level_t = 2;
 pub const WAYWALLEN_LOG_ERROR: waywallen_log_level_t = 3;
 
 pub type waywallen_log_callback_t = Option<
-    unsafe extern "C" fn(
-        level: waywallen_log_level_t,
-        msg: *const c_char,
-        user_data: *mut c_void,
-    ),
+    unsafe extern "C" fn(level: waywallen_log_level_t, msg: *const c_char, user_data: *mut c_void),
 >;
 
 // -----------------------------------------------------------------------------
@@ -90,6 +87,7 @@ pub type waywallen_backend_t = c_int;
 pub const WAYWALLEN_BACKEND_NONE: waywallen_backend_t = 0;
 pub const WAYWALLEN_BACKEND_EGL: waywallen_backend_t = 1;
 pub const WAYWALLEN_BACKEND_VULKAN: waywallen_backend_t = 2;
+pub const WAYWALLEN_BACKEND_DMABUF_RELAY: waywallen_backend_t = 3;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -136,6 +134,11 @@ pub struct waywallen_textures_t {
     pub gl_textures: *mut u32,
     pub vk_images: *mut *mut c_void,
     pub vk_memories: *mut *mut c_void,
+    pub shadow_dmabuf_fd: c_int,
+    pub shadow_n_planes: u32,
+    pub shadow_strides: [u32; 4],
+    pub shadow_offsets: [u64; 4],
+    pub shadow_modifier: u64,
 }
 
 #[repr(C)]
@@ -161,18 +164,14 @@ pub struct waywallen_frame_t {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct waywallen_display_callbacks_t {
-    pub on_textures_ready: Option<
-        unsafe extern "C" fn(user_data: *mut c_void, textures: *const waywallen_textures_t),
-    >,
-    pub on_textures_releasing: Option<
-        unsafe extern "C" fn(user_data: *mut c_void, textures: *const waywallen_textures_t),
-    >,
-    pub on_config: Option<
-        unsafe extern "C" fn(user_data: *mut c_void, config: *const waywallen_config_t),
-    >,
-    pub on_frame_ready: Option<
-        unsafe extern "C" fn(user_data: *mut c_void, frame: *const waywallen_frame_t),
-    >,
+    pub on_textures_ready:
+        Option<unsafe extern "C" fn(user_data: *mut c_void, textures: *const waywallen_textures_t)>,
+    pub on_textures_releasing:
+        Option<unsafe extern "C" fn(user_data: *mut c_void, textures: *const waywallen_textures_t)>,
+    pub on_config:
+        Option<unsafe extern "C" fn(user_data: *mut c_void, config: *const waywallen_config_t)>,
+    pub on_frame_ready:
+        Option<unsafe extern "C" fn(user_data: *mut c_void, frame: *const waywallen_frame_t)>,
     pub on_disconnected: Option<
         unsafe extern "C" fn(user_data: *mut c_void, err_code: c_int, message: *const c_char),
     >,
@@ -190,15 +189,36 @@ pub struct waywallen_display {
 }
 pub type waywallen_display_t = waywallen_display;
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct waywallen_display_version_t {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+pub const WAYWALLEN_WIN_HAS_NON_MINIMIZED: u32 = 1 << 0;
+pub const WAYWALLEN_WIN_HAS_ACTIVE: u32 = 1 << 1;
+pub const WAYWALLEN_WIN_HAS_MAXIMIZED: u32 = 1 << 2;
+pub const WAYWALLEN_WIN_HAS_FULLSCREEN: u32 = 1 << 3;
+
+pub type waywallen_button_state_t = c_int;
+pub const WAYWALLEN_BUTTON_RELEASED: waywallen_button_state_t = 0;
+pub const WAYWALLEN_BUTTON_PRESSED: waywallen_button_state_t = 1;
+
+pub type waywallen_axis_source_t = c_int;
+pub const WAYWALLEN_AXIS_WHEEL: waywallen_axis_source_t = 0;
+pub const WAYWALLEN_AXIS_FINGER: waywallen_axis_source_t = 1;
+pub const WAYWALLEN_AXIS_CONTINUOUS: waywallen_axis_source_t = 2;
+
 // -----------------------------------------------------------------------------
 // Functions
 // -----------------------------------------------------------------------------
 
 extern "C" {
-    pub fn waywallen_display_set_log_callback(
-        cb: waywallen_log_callback_t,
-        user_data: *mut c_void,
-    );
+    pub fn waywallen_display_version() -> waywallen_display_version_t;
+
+    pub fn waywallen_display_set_log_callback(cb: waywallen_log_callback_t, user_data: *mut c_void);
 
     pub fn waywallen_display_new(
         cb: *const waywallen_display_callbacks_t,
@@ -221,6 +241,7 @@ extern "C" {
         d: *mut waywallen_display_t,
         ctx: *const waywallen_vk_ctx_t,
     ) -> c_int;
+    pub fn waywallen_display_bind_dmabuf_relay(d: *mut waywallen_display_t) -> c_int;
 
     pub fn waywallen_display_set_drm_render_node(
         d: *mut waywallen_display_t,
@@ -260,19 +281,45 @@ extern "C" {
         height: u32,
     ) -> c_int;
 
+    pub fn waywallen_display_set_window_state(d: *mut waywallen_display_t, flags: u32) -> c_int;
+
     pub fn waywallen_display_get_fd(d: *mut waywallen_display_t) -> c_int;
+    pub fn waywallen_display_wants_writable(d: *mut waywallen_display_t) -> bool;
+    pub fn waywallen_display_handle_writable(d: *mut waywallen_display_t) -> c_int;
     pub fn waywallen_display_dispatch(d: *mut waywallen_display_t) -> c_int;
 
-    pub fn waywallen_display_release_frame(
+    pub fn waywallen_display_send_pointer_motion(
         d: *mut waywallen_display_t,
-        buffer_index: u32,
-        seq: u64,
+        x: f32,
+        y: f32,
+        timestamp_us: u64,
+        modifiers: u32,
+    ) -> c_int;
+    pub fn waywallen_display_send_pointer_button(
+        d: *mut waywallen_display_t,
+        x: f32,
+        y: f32,
+        button: u32,
+        state: waywallen_button_state_t,
+        timestamp_us: u64,
+        modifiers: u32,
+    ) -> c_int;
+    pub fn waywallen_display_send_pointer_axis(
+        d: *mut waywallen_display_t,
+        x: f32,
+        y: f32,
+        delta_x: f32,
+        delta_y: f32,
+        source: waywallen_axis_source_t,
+        timestamp_us: u64,
+        modifiers: u32,
     ) -> c_int;
 
     pub fn waywallen_display_signal_release_syncobj(fd: c_int) -> c_int;
 
     pub fn waywallen_display_conn_state(d: *mut waywallen_display_t) -> waywallen_conn_state_t;
     pub fn waywallen_display_stream_state(d: *mut waywallen_display_t) -> waywallen_stream_state_t;
+    pub fn waywallen_display_get_display_id(d: *mut waywallen_display_t) -> u64;
 
     pub fn waywallen_display_create_gl_texture(
         d: *mut waywallen_display_t,
