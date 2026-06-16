@@ -7,7 +7,7 @@ use niri_ipc::{Event, Request, Response, Window};
 use niri_ipc::socket::Socket;
 use niri_ipc::state::{EventStreamState, EventStreamStatePart, WindowsState, WorkspacesState};
 use thiserror::Error;
-use waywallen_display::{WAYWALLEN_WIN_HAS_ACTIVE, WAYWALLEN_WIN_HAS_FULLSCREEN};
+use waywallen_display::{WAYWALLEN_WIN_HAS_ACTIVE, WAYWALLEN_WIN_HAS_FULLSCREEN, WAYWALLEN_WIN_HAS_NON_MINIMIZED};
 use crate::OutputBinding;
 use crate::watcher::{handle_return_code, BindingRegistry};
 
@@ -106,11 +106,14 @@ fn get_outputs_flags<'a>(
             ).flatten()
         })
 }
+
 // Implementation note: niri can never have an unfocused window - it doesn't support minimization
 // Also, for now, the IPC doesn't report fullscreen / maximize state, so we have to guess for
 // fullscreen and just do without maximization.
 fn window_to_flags(fullscreen: (i32, i32), window: &Window) -> u32 {
-    let mut flags = WAYWALLEN_WIN_HAS_ACTIVE;
+    let mut flags = 0;
+    flags |= WAYWALLEN_WIN_HAS_NON_MINIMIZED;
+    flags |= WAYWALLEN_WIN_HAS_ACTIVE;
     if is_window_fullscreen(fullscreen, window) {
         flags |= WAYWALLEN_WIN_HAS_FULLSCREEN
     } /* else if is_window_maximized(fullscreen, window) {
