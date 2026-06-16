@@ -55,11 +55,11 @@ fn run_loop(event_socket: Socket, registry: BindingRegistry) {
             log::debug!("niri_watcher: niri event: {:?}", event);
             if matches!(event, Event::WindowLayoutsChanged {..} | Event::WindowOpenedOrChanged { .. } | Event::WindowFocusChanged {..} | Event::WorkspaceActivated {..}) {
                 state.apply(event);
-                log::debug!("niri_watcher: layouts changed, refreshing outputs");
                 registry.lock().map(|registry| {
                     get_outputs_flags(&*registry, &state.workspaces, &state.windows).for_each(|flags| {
                         flags.map(|(output, flags)| {
                             output.with_display(|display| unsafe {
+                                log::debug!("niri_watcher: layout {}: {flags} sent to server", output.display_name());
                                 waywallen_display::waywallen_display_set_window_state(display, flags)
                             }).map_or((), |return_code| {
                                 handle_return_code("niri_watcher", return_code, flags, output);
@@ -91,8 +91,8 @@ fn get_outputs_flags<'a>(
                                 Ok(logical_size) => logical_size.map(|(x, y)| {
                                     let flags = window_to_flags((x as i32, y as i32), active_window);
                                     log::debug!("niri_watcher: {} flags: {flags}", output.display_name());
-                                    let old_flags = output.window_flags().swap(0, Ordering::SeqCst);
-                                    (old_flags != 0).then_some(Ok((output, 0)))
+                                    let old_flags = output.window_flags().swap(flags, Ordering::SeqCst);
+                                    (old_flags != flags).then_some(Ok((output, flags)))
                                 }).flatten(),
                                 Err(error) => Some(Err(error))
                             }
