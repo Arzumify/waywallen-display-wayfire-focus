@@ -4,7 +4,7 @@
 //! (Hyprland, Sway, Niri, River, …) and registers each output as a
 //! display with the daemon over the waywallen-display UDS protocol.
 
-mod hyprland_watcher;
+mod watcher;
 
 use std::collections::HashMap;
 use std::ffi::{c_void, CStr, CString};
@@ -162,7 +162,7 @@ struct App {
     uds_sock: PathBuf,
     name_prefix: String,
     pointers: HashMap<u32, PointerCtx>,
-    binding_registry: crate::hyprland_watcher::BindingRegistry,
+    binding_registry: watcher::BindingRegistry,
 }
 
 struct PointerCtx {
@@ -189,7 +189,7 @@ impl App {
             uds_sock,
             name_prefix,
             pointers: HashMap::new(),
-            binding_registry: crate::hyprland_watcher::new_registry(),
+            binding_registry: watcher::new_registry(),
         }
     }
 
@@ -1380,7 +1380,7 @@ fn usage() -> ! {
     std::process::exit(2);
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let mut socket: Option<PathBuf> = None;
@@ -1415,7 +1415,7 @@ fn main() -> anyhow::Result<()> {
     run(socket, name_prefix)
 }
 
-fn run(socket: PathBuf, name_prefix: String) -> anyhow::Result<()> {
+fn run(socket: PathBuf, name_prefix: String) -> Result<()> {
     let conn = Connection::connect_to_env()
         .context("connect to WAYLAND_DISPLAY — are you running under a Wayland compositor?")?;
     let (globals, mut queue) = registry_queue_init::<App>(&conn).context("registry init")?;
@@ -1423,7 +1423,8 @@ fn run(socket: PathBuf, name_prefix: String) -> anyhow::Result<()> {
 
     let mut app = App::new(socket, name_prefix);
 
-    crate::hyprland_watcher::spawn(app.binding_registry.clone());
+    watcher::hyprland::spawn(app.binding_registry.clone());
+    watcher::niri::spawn(app.binding_registry.clone());
 
     for g in globals.contents().clone_list() {
         match g.interface.as_str() {

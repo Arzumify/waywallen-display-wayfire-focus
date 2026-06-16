@@ -4,7 +4,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use std::thread;
 use std::time::Duration;
 
@@ -13,12 +13,7 @@ use waywallen_display::{
     WAYWALLEN_WIN_HAS_ACTIVE, WAYWALLEN_WIN_HAS_FULLSCREEN, WAYWALLEN_WIN_HAS_MAXIMIZED,
     WAYWALLEN_WIN_HAS_NON_MINIMIZED,
 };
-
-pub type BindingRegistry = Arc<Mutex<HashMap<String, Arc<OutputBinding>>>>;
-
-pub fn new_registry() -> BindingRegistry {
-    Arc::new(Mutex::new(HashMap::new()))
-}
+use crate::watcher::{handle_return_code, BindingRegistry};
 
 pub fn detect_socket() -> Option<PathBuf> {
     let his = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE")?;
@@ -87,17 +82,7 @@ fn push_state(registry: &BindingRegistry) {
             waywallen_display::waywallen_display_set_window_state(d, flags)
         });
         if let Some(rc) = rc {
-            if rc >= 0 {
-                log::debug!(
-                    "hyprland_watcher: [{}] window_state flags=0x{flags:x}",
-                    binding.display_name()
-                );
-                continue;
-            }
-            log::warn!(
-                "hyprland_watcher: [{}] send window_state failed: {rc}",
-                binding.display_name()
-            );
+            handle_return_code("hyprland_watcher", rc, flags, &binding);
         }
     }
 }
