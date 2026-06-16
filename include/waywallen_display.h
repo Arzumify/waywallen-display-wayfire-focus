@@ -349,8 +349,8 @@ int waywallen_display_bind_vulkan(waywallen_display_t* d, const waywallen_vk_ctx
  *
  * Returns 0 on success, negative WAYWALLEN_ERR_* on failure.
  * Failure modes: Vulkan loader missing, no GPU with
- * VK_EXT_external_memory_dma_buf + VK_EXT_image_drm_format_modifier,
- * no transfer-capable queue.
+ * VK_EXT_external_memory_dma_buf + VK_EXT_queue_family_foreign +
+ * VK_EXT_image_drm_format_modifier, no transfer-capable queue.
  *
  * After this call the host gets DMABUF_RELAY data in textures_t
  * (shadow_dmabuf_fd and friends). The {egl,vk}_images arrays stay
