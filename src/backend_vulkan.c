@@ -937,10 +937,8 @@ int ww_vk_create_owned(ww_vk_owned_t* out) {
     vkEnumeratePhysicalDevices(out->instance, &pd_count, pds);
 
     const char* want[] = {
-        "VK_EXT_external_memory_dma_buf",
-        "VK_EXT_queue_family_foreign",
-        "VK_EXT_image_drm_format_modifier",
-        "VK_KHR_external_memory_fd",
+        "VK_EXT_external_memory_dma_buf",   "VK_EXT_queue_family_foreign",
+        "VK_EXT_image_drm_format_modifier", "VK_KHR_external_memory_fd",
         "VK_KHR_external_semaphore_fd",
     };
     const uint32_t want_n = (uint32_t)(sizeof(want) / sizeof(want[0]));
