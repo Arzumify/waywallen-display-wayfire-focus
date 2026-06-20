@@ -1,15 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Dumb window-state reporter. Aggregates the current screen's covering
-// windows into the `WW_WIN_HAS_*` bitmask that the daemon translates
-// into autopause. No mode, no debounce — daemon owns all policy.
-//
-// Bit layout matches WAYWALLEN_WIN_HAS_* in waywallen_display.h:
-//   bit 0  NON_MINIMIZED
-//   bit 1  ACTIVE
-//   bit 2  MAXIMIZED   (not counting fullscreen)
-//   bit 3  FULLSCREEN
-
 import QtQuick
 import org.kde.taskmanager 0.1 as TaskManager
 

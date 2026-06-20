@@ -4,16 +4,16 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use crate::watcher::{handle_return_code, BindingRegistry};
 use crate::OutputBinding;
 use waywallen_display::{
     WAYWALLEN_WIN_HAS_ACTIVE, WAYWALLEN_WIN_HAS_FULLSCREEN, WAYWALLEN_WIN_HAS_MAXIMIZED,
     WAYWALLEN_WIN_HAS_NON_MINIMIZED,
 };
-use crate::watcher::{handle_return_code, BindingRegistry};
 
 pub fn detect_socket() -> Option<PathBuf> {
     let his = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE")?;

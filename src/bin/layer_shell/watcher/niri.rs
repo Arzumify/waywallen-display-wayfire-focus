@@ -1,15 +1,17 @@
-use std::path::{Path};
-use std::thread;
-use std::collections::HashMap;
-use std::sync::{Arc, MutexGuard, PoisonError};
-use std::sync::atomic::Ordering;
-use niri_ipc::{Event, Request, Response, Window};
+use crate::watcher::{handle_return_code, BindingRegistry};
+use crate::OutputBinding;
 use niri_ipc::socket::Socket;
 use niri_ipc::state::{EventStreamState, EventStreamStatePart, WindowsState, WorkspacesState};
+use niri_ipc::{Event, Request, Response, Window};
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, MutexGuard, PoisonError};
+use std::thread;
 use thiserror::Error;
-use waywallen_display::{WAYWALLEN_WIN_HAS_ACTIVE, WAYWALLEN_WIN_HAS_FULLSCREEN, WAYWALLEN_WIN_HAS_NON_MINIMIZED};
-use crate::OutputBinding;
-use crate::watcher::{handle_return_code, BindingRegistry};
+use waywallen_display::{
+    WAYWALLEN_WIN_HAS_ACTIVE, WAYWALLEN_WIN_HAS_FULLSCREEN, WAYWALLEN_WIN_HAS_NON_MINIMIZED,
+};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -34,17 +36,26 @@ pub fn spawn(registry: BindingRegistry) {
         return;
     };
     log::info!("niri_watcher: enabled (socket={})", sock.as_ref().display());
-    Socket::connect_to(sock.as_ref()).map(|mut event_socket|
-        event_socket.send(Request::EventStream).map(|reply| match reply {
-            Ok(response) => match response {
-                Response::Handled => {
-                    thread::spawn(move || run_loop(event_socket, registry));
-                },
-                response => log::error!("niri_watcher: {}", Error::UnexpectedResponse(response))
-            }
-            Err(error) => log::error!("niri_watcher: {}", Error::CompositorResponse(error))
-        }).unwrap_or_else(|error| log::error!("niri_watcher: request eventstream: {error}"))
-    ).unwrap_or_else(|error| log::error!("niri_watcher: connect {}: {error}", sock.as_ref().display()))
+    Socket::connect_to(sock.as_ref())
+        .map(|mut event_socket| {
+            event_socket
+                .send(Request::EventStream)
+                .map(|reply| match reply {
+                    Ok(response) => match response {
+                        Response::Handled => {
+                            thread::spawn(move || run_loop(event_socket, registry));
+                        }
+                        response => {
+                            log::error!("niri_watcher: {}", Error::UnexpectedResponse(response))
+                        }
+                    },
+                    Err(error) => log::error!("niri_watcher: {}", Error::CompositorResponse(error)),
+                })
+                .unwrap_or_else(|error| log::error!("niri_watcher: request eventstream: {error}"))
+        })
+        .unwrap_or_else(|error| {
+            log::error!("niri_watcher: connect {}: {error}", sock.as_ref().display())
+        })
 }
 
 fn run_loop(event_socket: Socket, registry: BindingRegistry) {
@@ -77,33 +88,60 @@ fn run_loop(event_socket: Socket, registry: BindingRegistry) {
 fn get_outputs_flags<'a>(
     outputs: &'a HashMap<String, Arc<OutputBinding>>,
     workspaces_state: &'a WorkspacesState,
-    windows_state: &'a WindowsState
-) -> impl Iterator<Item = Result<(&'a Arc<OutputBinding>, u32), PoisonError<MutexGuard<'a, Option<(u32, u32)>>>>> {
-    workspaces_state.workspaces.values()
+    windows_state: &'a WindowsState,
+) -> impl Iterator<
+    Item = Result<(&'a Arc<OutputBinding>, u32), PoisonError<MutexGuard<'a, Option<(u32, u32)>>>>,
+> {
+    workspaces_state
+        .workspaces
+        .values()
         .filter_map(|workspace| {
             workspace.is_active.then_some(())?;
-            workspace.output.as_ref().map(|output|
-                outputs.get(output).map(|output| {
-                    output.is_registered().then_some(())?;
-                    workspace.active_window_id.map(|active_window_id|
-                        windows_state.windows.get(&active_window_id).map(|active_window|
-                            match output.logical_size.lock() {
-                                Ok(logical_size) => logical_size.map(|(x, y)| {
-                                    let flags = window_to_flags((x as i32, y as i32), active_window);
-                                    log::debug!("niri_watcher: {} flags: {flags}", output.display_name());
-                                    let old_flags = output.window_flags().swap(flags, Ordering::SeqCst);
-                                    (old_flags != flags).then_some(Ok((output, flags)))
-                                }).flatten(),
-                                Err(error) => Some(Err(error))
-                            }
-                        ).flatten()
-                    ).unwrap_or_else(|| {
-                        log::debug!("niri_watcher: {} flags: 0", output.display_name());
-                        let old_flags = output.window_flags().swap(0, Ordering::SeqCst);
-                        (old_flags != 0).then_some(Ok((output, 0)))
-                    })
-                }).flatten()
-            ).flatten()
+            workspace
+                .output
+                .as_ref()
+                .map(|output| {
+                    outputs
+                        .get(output)
+                        .map(|output| {
+                            output.is_registered().then_some(())?;
+                            workspace
+                                .active_window_id
+                                .map(|active_window_id| {
+                                    windows_state
+                                        .windows
+                                        .get(&active_window_id)
+                                        .map(|active_window| match output.logical_size.lock() {
+                                            Ok(logical_size) => logical_size
+                                                .map(|(x, y)| {
+                                                    let flags = window_to_flags(
+                                                        (x as i32, y as i32),
+                                                        active_window,
+                                                    );
+                                                    log::debug!(
+                                                        "niri_watcher: {} flags: {flags}",
+                                                        output.display_name()
+                                                    );
+                                                    let old_flags = output
+                                                        .window_flags()
+                                                        .swap(flags, Ordering::SeqCst);
+                                                    (old_flags != flags)
+                                                        .then_some(Ok((output, flags)))
+                                                })
+                                                .flatten(),
+                                            Err(error) => Some(Err(error)),
+                                        })
+                                        .flatten()
+                                })
+                                .unwrap_or_else(|| {
+                                    log::debug!("niri_watcher: {} flags: 0", output.display_name());
+                                    let old_flags = output.window_flags().swap(0, Ordering::SeqCst);
+                                    (old_flags != 0).then_some(Ok((output, 0)))
+                                })
+                        })
+                        .flatten()
+                })
+                .flatten()
         })
 }
 
@@ -117,8 +155,8 @@ fn window_to_flags(fullscreen: (i32, i32), window: &Window) -> u32 {
     if is_window_fullscreen(fullscreen, window) {
         flags |= WAYWALLEN_WIN_HAS_FULLSCREEN
     } /* else if is_window_maximized(fullscreen, window) {
-        flags |= WAYWALLEN_WIN_HAS_MAXIMIZED
-    } */
+          flags |= WAYWALLEN_WIN_HAS_MAXIMIZED
+      } */
     flags
 }
 

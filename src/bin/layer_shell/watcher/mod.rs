@@ -1,6 +1,6 @@
+use crate::OutputBinding;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use crate::OutputBinding;
 
 pub mod hyprland;
 pub mod niri;
@@ -11,7 +11,12 @@ pub fn new_registry() -> BindingRegistry {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
-pub fn handle_return_code(watcher: &'static str, return_code: i32, flags: u32, binding: &Arc<OutputBinding>) {
+pub fn handle_return_code(
+    watcher: &'static str,
+    return_code: i32,
+    flags: u32,
+    binding: &Arc<OutputBinding>,
+) {
     if return_code >= 0 {
         log::debug!(
             "{watcher}: [{}] window_state flags=0x{flags:x}",

@@ -1,10 +1,3 @@
-/*
-    SPDX-License-Identifier: GPL-2.0-or-later
-
-    Isolated so that a missing `Waywallen.Display` module fails inside a Loader
-    instead of killing the whole wallpaper plugin at parse time.
-*/
-
 import QtQuick
 import Waywallen.Display as WW
 
