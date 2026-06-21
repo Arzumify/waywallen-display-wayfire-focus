@@ -1,0 +1,68 @@
+<release version="0.2.7" date="2026-06-21">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Layer-shell output instance id reporting.</li>
+      <li>Add niri focus checking by @Arzumify in https://github.com/waywallen/waywallen-display/pull/19</li>
+    </ul>
+    <p>Fixed:</p>
+    <ul>
+      <li>KDE display instance id handling.</li>
+      <li>Layer-shell rotation transforms.</li>
+      <li>Layer-shell workspace flag updates.</li>
+      <li>Layer-shell IPC event subscription.</li>
+    </ul>
+  </description>
+</release>
+<release version="0.2.6" date="2026-06-16">
+  <description>
+    <p>Fixed: DMA-BUF relay foreign image ownership.</p>
+    <p>Fixed: Multi-plane Vulkan import fd ownership.</p>
+  </description>
+</release>
+<release version="0.2.5" date="2026-06-15">
+  <description>
+    <p>Added: Layer-shell display process package.</p>
+    <p>Changed: Rust package name now matches waywallen-display.</p>
+    <p>Changed: Release CI now builds the layer-shell artifact.</p>
+  </description>
+</release>
+<release version="0.2.4" date="2026-05-30">
+  <description>
+    <p>Added: GNOME Shell extension package.</p>
+    <p>Added: GObject integration cleanup for GNOME rendering.</p>
+    <p>Changed: Release CI can build and upload the GNOME extension zip.</p>
+    <p>Fixed: GNOME extension metadata compliance.</p>
+    <p>Fixed: GNOME multi-monitor null handling and monitor scaling.</p>
+    <p>Fixed: Display disconnect storms and black initial background.</p>
+  </description>
+</release>
+<release version="0.2.3" date="2026-05-27">
+  <description>
+    <p>Changed: KDE CI builds the embedded QML module variant.</p>
+    <p>Changed: KDE config no longer exposes the SurfaceMode option.</p>
+  </description>
+</release>
+<release version="0.2.2" date="2026-05-25">
+  <description>
+    <p>Added: Configurable QML module URI for embedded builds.</p>
+    <p>Added: KDE diagnostics for display import and screen state.</p>
+    <p>Fixed: Protocol read/write overflow guards in generated bindings.</p>
+  </description>
+</release>
+<release version="0.2.1" date="2026-05-24">
+  <description>
+    <p>Added: KDE auto-pause support.</p>
+    <p>Added: KDE configuration hints for Plasma shell restart and X11 EGL backend setup.</p>
+  </description>
+</release>
+<release version="0.2.0" date="2026-05-12">
+  <description>
+    <p>Added: QML plugin transform handling.</p>
+    <p>Added: Display library version API.</p>
+    <p>Added: Release syncobj signaling for lower-latency frame release.</p>
+    <p>Added: Clear-color support.</p>
+    <p>Changed: Reworked frame release handling to avoid device loss during rapid wallpaper switching.</p>
+    <p>Fixed: EGL dirty-geometry and context state handling.</p>
+  </description>
+</release>
