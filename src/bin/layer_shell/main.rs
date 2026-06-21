@@ -501,6 +501,37 @@ fn ms_to_us(time_ms: u32) -> u64 {
     (time_ms as u64).saturating_mul(1000)
 }
 
+fn wl_transform(value: u32) -> Transform {
+    match value {
+        1 => Transform::_90,
+        2 => Transform::_180,
+        3 => Transform::_270,
+        4 => Transform::Flipped,
+        5 => Transform::Flipped90,
+        6 => Transform::Flipped180,
+        7 => Transform::Flipped270,
+        _ => Transform::Normal,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_config_transform_to_wayland_transform() {
+        assert_eq!(wl_transform(0), Transform::Normal);
+        assert_eq!(wl_transform(1), Transform::_90);
+        assert_eq!(wl_transform(2), Transform::_180);
+        assert_eq!(wl_transform(3), Transform::_270);
+        assert_eq!(wl_transform(4), Transform::Flipped);
+        assert_eq!(wl_transform(5), Transform::Flipped90);
+        assert_eq!(wl_transform(6), Transform::Flipped180);
+        assert_eq!(wl_transform(7), Transform::Flipped270);
+        assert_eq!(wl_transform(8), Transform::Normal);
+    }
+}
+
 fn logical_to_physical(state: &App, output_name: u32, lx: f64, ly: f64) -> (f32, f32) {
     let Some(entry) = state.outputs.get(&output_name) else {
         return (lx as f32, ly as f32);
@@ -1348,7 +1379,9 @@ fn present_shadow(binding: &OutputBinding) -> Result<()> {
     }
 
     if cfg.transform_dirty {
-        binding.surface.set_buffer_transform(Transform::Normal);
+        binding
+            .surface
+            .set_buffer_transform(wl_transform(cfg.transform));
         cfg.transform_dirty = false;
     }
 
