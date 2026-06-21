@@ -2,6 +2,7 @@
 
 #include <waywallen_display.h>
 
+#include <QCryptographicHash>
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDebug>
@@ -13,6 +14,7 @@
 #include <QQuickGraphicsConfiguration>
 #include <QQuickWindow>
 #include <QRunnable>
+#include <QScreen>
 #include <QSGRendererInterface>
 #include <QSGSimpleTextureNode>
 #include <QSGTransformNode>
@@ -20,6 +22,7 @@
 #include <QtGui/qopenglcontext_platform.h>
 #include <QtQuick/qsgtexture_platform.h>
 #include <cstring>
+#include <limits>
 #include <unistd.h>
 
 Q_LOGGING_CATEGORY(lcWD, "waywallen.display")
@@ -40,6 +43,8 @@ public:
 private:
     std::function<void()> m_fn;
 };
+
+QString screenPart(const QString& value) { return value.trimmed(); }
 } // namespace
 
 // Linux input event codes — matches wlroots / Wayland convention so
@@ -397,6 +402,38 @@ void WaywallenDisplay::cleanup() {
 // ---------------------------------------------------------------------------
 // Properties
 // ---------------------------------------------------------------------------
+
+QString WaywallenDisplay::screenIdentityKey() const {
+    auto* w = window();
+    auto* s = w ? w->screen() : nullptr;
+    if (! s) return {};
+
+    return QStringLiteral("name=%1|manufacturer=%2|model=%3|serial=%4")
+        .arg(screenPart(s->name()),
+             screenPart(s->manufacturer()),
+             screenPart(s->model()),
+             screenPart(s->serialNumber()));
+}
+
+QString WaywallenDisplay::effectiveInstanceId() const {
+    if (! m_instanceId.isEmpty()) return m_instanceId;
+
+    const auto key = screenIdentityKey();
+    if (key.isEmpty()) return {};
+
+    const auto md5 = QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Md5).toHex();
+    return QStringLiteral("kde-") + QString::fromLatin1(md5);
+}
+
+uint32_t WaywallenDisplay::screenRefreshMhz() const {
+    auto* w = window();
+    auto* s = w ? w->screen() : nullptr;
+    if (! s || s->refreshRate() <= 0.0) return 60000;
+
+    const auto mhz = qRound64(s->refreshRate() * 1000.0);
+    if (mhz <= 0 || mhz > std::numeric_limits<uint32_t>::max()) return 60000;
+    return static_cast<uint32_t>(mhz);
+}
 
 void WaywallenDisplay::setSocketPath(const QString& path) {
     if (m_socketPath == path) return;
@@ -931,7 +968,8 @@ void WaywallenDisplay::tryConnect() {
 
     const QByteArray sockPath   = m_socketPath.toUtf8();
     const QByteArray name       = m_displayName.toUtf8();
-    const QByteArray instanceId = m_instanceId.toUtf8();
+    const QByteArray instanceId = effectiveInstanceId().toUtf8();
+    const uint32_t   refreshMhz = screenRefreshMhz();
     int              rc =
         waywallen_display_begin_connect(m_display,
                                         sockPath.isEmpty() ? nullptr : sockPath.constData(),
@@ -939,7 +977,7 @@ void WaywallenDisplay::tryConnect() {
                                         instanceId.isEmpty() ? nullptr : instanceId.constData(),
                                         static_cast<uint32_t>(m_displayWidth),
                                         static_cast<uint32_t>(m_displayHeight),
-                                        60000);
+                                        refreshMhz);
 
     if (rc != WAYWALLEN_OK) {
         qCWarning(lcWD, "begin_connect failed: %d (waiting for daemon DBus signal)", rc);

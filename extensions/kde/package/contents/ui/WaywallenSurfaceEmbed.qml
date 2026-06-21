@@ -5,14 +5,12 @@ WW.WaywallenDisplay {
     id: display
 
     property string displayNameBinding
-    property string instanceIdBinding
     property int    displayWidthBinding
     property int    displayHeightBinding
     property bool   mouseForwardBinding: true
     property int    windowStateFlagsBinding: 0
 
     displayName:         displayNameBinding
-    instanceId:          instanceIdBinding
     autoReconnect:       true
     displayWidth:        displayWidthBinding
     displayHeight:       displayHeightBinding

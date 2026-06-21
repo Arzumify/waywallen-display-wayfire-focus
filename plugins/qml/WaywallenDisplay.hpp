@@ -10,6 +10,7 @@
 #include <QTimer>
 #include <QVector>
 #include <qqml.h>
+#include <cstdint>
 
 #ifdef WW_HAVE_VULKAN
 #    include "backend_vulkan_blit.h"
@@ -97,7 +98,7 @@ public:
     QString displayName() const { return m_displayName; }
     void    setDisplayName(const QString& name);
 
-    QString instanceId() const { return m_instanceId; }
+    QString instanceId() const { return effectiveInstanceId(); }
     void    setInstanceId(const QString& id);
 
     int  displayWidth() const { return m_displayWidth; }
@@ -174,13 +175,16 @@ private slots:
     void pushSizeUpdate();
 
 private:
-    void tryConnect();
-    void cleanup();
-    void setupDBusWatcher();
-    void flushPendingRelease();
-    void handleDisconnect(int errCode, const char* msg);
-    void setConnState(ConnState s);
-    void setStreamState(StreamState s);
+    void     tryConnect();
+    void     cleanup();
+    void     setupDBusWatcher();
+    void     flushPendingRelease();
+    void     handleDisconnect(int errCode, const char* msg);
+    void     setConnState(ConnState s);
+    void     setStreamState(StreamState s);
+    QString  screenIdentityKey() const;
+    QString  effectiveInstanceId() const;
+    uint32_t screenRefreshMhz() const;
     /* Probe wants_writable and toggle m_notifierWrite::setEnabled.
      * Call after any post-handshake send that may have left bytes
      * queued in the lib's outbox (update_size, pointer events). */

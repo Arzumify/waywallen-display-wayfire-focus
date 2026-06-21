@@ -20,23 +20,6 @@ WallpaperItem {
         return "kde-wallpaper";
     }
 
-    // RFC 4122 v4 (random) UUID generated client-side on first run and
-    // persisted in this wallpaper containment's KDE config. Sent to the
-    // daemon as `register_display.instance_id` so per-display settings
-    // (fillmode/align/clear color) live under a key that is stable
-    // across screen renames, identical-monitor swaps, and user edits to
-    // the human-readable Display name.
-    function _generateUuidV4() {
-        // Math.random isn't crypto-grade; here it just needs to make
-        // collisions astronomically unlikely within one user's session
-        // graveyard, which 122 bits of entropy comfortably covers.
-        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
-            const r = Math.random() * 16 | 0;
-            const v = c === "x" ? r : (r & 0x3 | 0x8);
-            return v.toString(16);
-        });
-    }
-
     // Background is owned by the renderer (via the daemon's
     // `set_config.clear_*`); the surface itself paints any letterbox
     // bars. Show opaque black until the surface attaches so a slow
@@ -76,7 +59,6 @@ WallpaperItem {
                 root.configuration.DisplayName.length > 0
                     ? root.configuration.DisplayName
                     : root.defaultDisplayName);
-            item.instanceIdBinding         = Qt.binding(() => root.configuration.DisplayInstanceId);
             item.displayWidthBinding       = Qt.binding(() => Math.round(root.width  * Screen.devicePixelRatio));
             item.displayHeightBinding      = Qt.binding(() => Math.round(root.height * Screen.devicePixelRatio));
             item.mouseForwardBinding       = Qt.binding(() => root.configuration.MouseForward);
@@ -269,13 +251,6 @@ WallpaperItem {
     }
 
     Component.onCompleted: {
-        if (root.configuration.DisplayInstanceId.length === 0) {
-            root.configuration.DisplayInstanceId = root._generateUuidV4();
-            root.configuration.writeConfig();
-        }
-        // Release the gate: surfaceLoader now constructs WaywallenDisplay
-        // with a guaranteed-non-empty DisplayInstanceId, so the first
-        // tryConnect carries the real UUID rather than racing the write.
         root._initDone = true;
         // Async wallpaper: content arrives via the daemon stream, which can
         // take arbitrary time (or never connect, if the daemon is down). We

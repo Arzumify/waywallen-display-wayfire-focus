@@ -5,7 +5,6 @@ WW.WaywallenDisplay {
     id: display
 
     property string displayNameBinding
-    property string instanceIdBinding
     property int    displayWidthBinding
     property int    displayHeightBinding
     property bool   mouseForwardBinding: true
@@ -15,7 +14,6 @@ WW.WaywallenDisplay {
     // from the daemon's `set_config` and applies it internally. KDE's
     // wallpaper plugin no longer overrides it.
     displayName:         displayNameBinding
-    instanceId:          instanceIdBinding
     autoReconnect:       true
     displayWidth:        displayWidthBinding
     displayHeight:       displayHeightBinding
