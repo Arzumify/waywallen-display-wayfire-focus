@@ -17,6 +17,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
+use md5::{Digest, Md5};
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{
     wl_buffer::WlBuffer,
@@ -61,6 +62,7 @@ fn default_socket_path() -> PathBuf {
 
 pub struct OutputBinding {
     display_name: String,
+    instance_id: String,
     surface: WlSurface,
     dmabuf: ZwpLinuxDmabufV1,
     conn: Connection,
@@ -70,6 +72,7 @@ pub struct OutputBinding {
     logical_size: Mutex<Option<(u32, u32)>>,
     scale: std::sync::atomic::AtomicI32,
     fractional_scale_120: AtomicU32,
+    refresh_mhz: AtomicU32,
     viewport: Option<WpViewport>,
     closed: AtomicBool,
     display: Mutex<Option<DisplayPtr>>,
@@ -145,7 +148,11 @@ struct OutputEntry {
     scale: i32,
     fractional_scale: Option<WpFractionalScaleV1>,
     fractional_scale_120: u32,
+    refresh_mhz: u32,
     output_name_str: Option<String>,
+    output_description: Option<String>,
+    output_make: Option<String>,
+    output_model: Option<String>,
 }
 
 struct App {
@@ -294,7 +301,11 @@ impl Dispatch<WlRegistry, GlobalListContents> for App {
                             scale: 1,
                             fractional_scale: None,
                             fractional_scale_120: 0,
+                            refresh_mhz: 60_000,
                             output_name_str: None,
+                            output_description: None,
+                            output_make: None,
+                            output_model: None,
                         },
                     );
                     log::info!("hot-plug: wl_output name={name} added; bringing up surface");
@@ -499,6 +510,27 @@ impl Dispatch<WlPointer, u32> for App {
 
 fn ms_to_us(time_ms: u32) -> u64 {
     (time_ms as u64).saturating_mul(1000)
+}
+
+fn output_part(value: Option<&str>) -> &str {
+    value.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("")
+}
+
+fn output_identity_key(entry: &OutputEntry, output_name: u32) -> String {
+    let name = output_part(entry.output_name_str.as_deref());
+    let description = output_part(entry.output_description.as_deref());
+    let make = output_part(entry.output_make.as_deref());
+    let model = output_part(entry.output_model.as_deref());
+    if name.is_empty() && description.is_empty() && make.is_empty() && model.is_empty() {
+        return format!("global={output_name}");
+    }
+    format!("name={name}|description={description}|make={make}|model={model}")
+}
+
+fn layer_instance_id(entry: &OutputEntry, output_name: u32) -> String {
+    let mut hasher = Md5::new();
+    hasher.update(output_identity_key(entry, output_name).as_bytes());
+    format!("layer-{:x}", hasher.finalize())
 }
 
 fn wl_transform(value: u32) -> Transform {
@@ -709,6 +741,39 @@ impl Dispatch<WlOutput, u32> for App {
                     entry.output_name_str = Some(name);
                 }
             }
+            wl_output::Event::Description { description } => {
+                if let Some(entry) = state.outputs.get_mut(&output_name) {
+                    log::info!("output {output_name}: wl_output.description = {description:?}");
+                    entry.output_description = Some(description);
+                }
+            }
+            wl_output::Event::Geometry { make, model, .. } => {
+                if let Some(entry) = state.outputs.get_mut(&output_name) {
+                    log::info!(
+                        "output {output_name}: wl_output.geometry make={make:?} model={model:?}"
+                    );
+                    entry.output_make = Some(make);
+                    entry.output_model = Some(model);
+                }
+            }
+            wl_output::Event::Mode { flags, refresh, .. } => {
+                let is_current = match flags {
+                    wayland_client::WEnum::Value(flags) => flags.contains(wl_output::Mode::Current),
+                    _ => false,
+                };
+                if is_current && refresh > 0 {
+                    if let Some(entry) = state.outputs.get_mut(&output_name) {
+                        let refresh_mhz = refresh as u32;
+                        entry.refresh_mhz = refresh_mhz;
+                        if let Some(binding) = entry.binding.as_ref() {
+                            binding.refresh_mhz.store(refresh_mhz, Ordering::SeqCst);
+                        }
+                        log::info!(
+                            "output {output_name}: wl_output.mode current refresh={refresh_mhz}mHz"
+                        );
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -887,7 +952,7 @@ impl Dispatch<ZwlrLayerSurfaceV1, u32> for App {
                     log::warn!("configure for unknown output_name={output_name}");
                     return;
                 };
-                let binding = entry.binding.get_or_insert_with(|| {
+                if entry.binding.is_none() {
                     let surface = entry
                         .surface
                         .clone()
@@ -897,8 +962,15 @@ impl Dispatch<ZwlrLayerSurfaceV1, u32> for App {
                         Some(n) if !n.is_empty() => n.to_string(),
                         _ => format!("{}-{}", state.name_prefix, output_name),
                     };
-                    Arc::new(OutputBinding {
+                    let instance_id = layer_instance_id(entry, output_name);
+                    let refresh_mhz = entry.refresh_mhz;
+                    log::info!(
+                        "output {output_name}: identity '{}' -> instance_id={instance_id}",
+                        output_identity_key(entry, output_name)
+                    );
+                    entry.binding = Some(Arc::new(OutputBinding {
                         display_name,
+                        instance_id,
                         surface,
                         dmabuf,
                         conn: conn.clone(),
@@ -908,6 +980,7 @@ impl Dispatch<ZwlrLayerSurfaceV1, u32> for App {
                         logical_size: Mutex::new(None),
                         scale: std::sync::atomic::AtomicI32::new(entry.scale.max(1)),
                         fractional_scale_120: AtomicU32::new(entry.fractional_scale_120),
+                        refresh_mhz: AtomicU32::new(refresh_mhz),
                         viewport: entry.viewport.clone(),
                         closed: AtomicBool::new(false),
                         display: Mutex::new(None),
@@ -917,8 +990,9 @@ impl Dispatch<ZwlrLayerSurfaceV1, u32> for App {
                         layer_buffer: Mutex::new(None),
                         config: Mutex::new(FrameConfig::default()),
                         window_flags: AtomicU32::new(0),
-                    })
-                });
+                    }));
+                }
+                let binding = entry.binding.as_ref().expect("binding just created");
                 {
                     let mut reg = state.binding_registry.lock().unwrap();
                     reg.insert(binding.display_name().to_string(), binding.clone());
@@ -1105,6 +1179,7 @@ fn run_uds_session(sock: &Path, binding: &Arc<OutputBinding>) -> Result<()> {
         .unwrap()
         .expect("worker started before configure");
     let display_name = CString::new(binding.display_name.as_str()).context("display name")?;
+    let instance_id = CString::new(binding.instance_id.as_str()).context("instance id")?;
     let socket_path = CString::new(sock.as_os_str().as_encoded_bytes()).context("socket path")?;
 
     let callbacks = sys::waywallen_display_callbacks_t {
@@ -1134,10 +1209,10 @@ fn run_uds_session(sock: &Path, binding: &Arc<OutputBinding>) -> Result<()> {
                 display,
                 socket_path.as_ptr(),
                 display_name.as_ptr(),
-                std::ptr::null(),
+                instance_id.as_ptr(),
                 width,
                 height,
-                60_000,
+                binding.refresh_mhz.load(Ordering::SeqCst),
             )
         };
         if rc < 0 {
@@ -1148,8 +1223,10 @@ fn run_uds_session(sock: &Path, binding: &Arc<OutputBinding>) -> Result<()> {
 
         let display_id = unsafe { sys::waywallen_display_get_display_id(display) };
         log::info!(
-            "[{}] registered as display_id={display_id} ({width}x{height})",
-            binding.display_name
+            "[{}] registered as display_id={display_id} instance_id={} ({width}x{height}@{}mHz)",
+            binding.display_name,
+            binding.instance_id,
+            binding.refresh_mhz.load(Ordering::SeqCst)
         );
 
         if let Some(latest) = *binding.configured_size.lock().unwrap() {
@@ -1525,7 +1602,11 @@ fn run(socket: PathBuf, name_prefix: String) -> Result<()> {
                         scale: 1,
                         fractional_scale: None,
                         fractional_scale_120: 0,
+                        refresh_mhz: 60_000,
                         output_name_str: None,
+                        output_description: None,
+                        output_make: None,
+                        output_model: None,
                     },
                 );
             }
