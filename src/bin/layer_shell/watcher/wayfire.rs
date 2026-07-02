@@ -1,4 +1,5 @@
 use crate::watcher::BindingRegistry;
+use crate::OutputBinding;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -7,6 +8,7 @@ use std::io::{Read, Write};
 use std::num::TryFromIntError;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::Arc;
 use std::{io, thread};
 use thiserror::Error;
 use waywallen_display::{
@@ -246,16 +248,23 @@ fn run_loop(mut event_socket: WFSocket<impl Read + Write>, registry: BindingRegi
                         registry
                             .lock()
                             .map(|registry| {
-                                let mut map: HashMap<&String, u32> =
-                                    registry.iter().map(|(display, _)| (display, 0)).collect();
+                                let mut display_flags: HashMap<
+                                    &String,
+                                    (u32, &Arc<OutputBinding>),
+                                > = registry
+                                    .iter()
+                                    .map(|(display_name, output)| (display_name, (0, output)))
+                                    .collect();
                                 for view in views {
                                     if view.minimized {
                                         continue;
                                     }
-                                    if let Some(display) = map.get_mut(&view.output_name) {
-                                        *display |= WAYWALLEN_WIN_HAS_NON_MINIMIZED;
+                                    if let Some((flags, _)) =
+                                        display_flags.get_mut(&view.output_name)
+                                    {
+                                        *flags |= WAYWALLEN_WIN_HAS_NON_MINIMIZED;
                                         if view.activated {
-                                            *display |= WAYWALLEN_WIN_HAS_ACTIVE
+                                            *flags |= WAYWALLEN_WIN_HAS_ACTIVE
                                         }
                                         // TODO: Waiting on https://github.com/WayfireWM/wayfire/issues/3058
                                         /*
@@ -264,9 +273,20 @@ fn run_loop(mut event_socket: WFSocket<impl Read + Write>, registry: BindingRegi
                                         }
                                         */
                                         if view.fullscreen {
-                                            *display |= WAYWALLEN_WIN_HAS_FULLSCREEN
+                                            *flags |= WAYWALLEN_WIN_HAS_FULLSCREEN
                                         }
                                     }
+                                }
+                                for (flags, output) in display_flags.values() {
+                                    output.with_display(|display| unsafe {
+                                        log::debug!(
+                                            "wayfire_watcher: layout {}: {flags} sent to server",
+                                            output.display_name
+                                        );
+                                        waywallen_display::waywallen_display_set_window_state(
+                                            display, *flags,
+                                        )
+                                    });
                                 }
                             })
                             .unwrap_or_else(|error| {
