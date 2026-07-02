@@ -173,7 +173,7 @@ pub struct View {
     bounding_box: BoundingBox,
     #[serde(deserialize_with = "is_toplevel", rename = "type")]
     toplevel: bool,
-    mapped: bool
+    mapped: bool,
 }
 
 pub fn is_toplevel<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
