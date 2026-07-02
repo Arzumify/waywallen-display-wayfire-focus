@@ -1,8 +1,8 @@
 use crate::watcher::BindingRegistry;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Map;
-use std::collections::HashMap;
+use serde_json::{Map, Value};
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::num::TryFromIntError;
 use std::os::unix::net::UnixStream;
@@ -25,14 +25,16 @@ pub enum Error {
     SendRequest(io::Error),
     #[error("flush request: {0}")]
     FlushRequest(io::Error),
-    #[error("receive response header: {0}")]
+    #[error("receive message header: {0}")]
     ReceiveResponseHeader(io::Error),
-    #[error("receive response header: {0}")]
-    ReceiveResponse(io::Error),
+    #[error("receive message header: {0}")]
+    ReceiveMessage(io::Error),
+    #[error("deserialize message: {0}")]
+    DeserializeMessage(serde_json::Error),
     #[error("deserialize response: {0}")]
     DeserializeResponse(serde_json::Error),
-    #[error("compositor response: {0}")]
-    CompositorResponse(String),
+    #[error("deserialize event: {0}")]
+    DeserializeEvent(serde_json::Error),
 }
 
 pub fn detect_socket() -> Option<impl AsRef<Path>> {
@@ -45,38 +47,89 @@ pub fn detect_socket() -> Option<impl AsRef<Path>> {
     }
 }
 
-pub struct WFSocket<W>(W);
+pub struct WFSocket<W> {
+    socket: W,
+    event_queue: VecDeque<Value>,
+    response_queue: VecDeque<Value>,
+}
+
+impl<W> WFSocket<W> {
+    fn new(socket: W) -> Self {
+        Self {
+            socket,
+            event_queue: VecDeque::default(),
+            response_queue: VecDeque::default(),
+        }
+    }
+}
 
 impl<W: Read> WFSocket<W> {
+    fn receive_event(&mut self) -> Result<Event, Error> {
+        self.event_queue
+            .pop_front()
+            .map(Ok)
+            .unwrap_or_else(|| loop {
+                let value = self.receive_message()?;
+                if value.get("event").is_some() {
+                    return Ok(value);
+                } else {
+                    self.response_queue.push_back(value);
+                }
+            })
+            .map(|value| serde_json::from_value(value).map_err(Error::DeserializeEvent))
+            .flatten()
+    }
+
     fn receive_response<D: DeserializeOwned>(&mut self) -> Result<D, Error> {
+        self.response_queue
+            .pop_front()
+            .map(Ok)
+            .unwrap_or_else(|| loop {
+                let value = self.receive_message()?;
+                if value.get("event").is_some() {
+                    self.event_queue.push_back(value);
+                } else {
+                    return Ok(value);
+                }
+            })
+            .map(|value| serde_json::from_value(value).map_err(Error::DeserializeResponse))
+            .flatten()
+    }
+
+    fn receive_message(&mut self) -> Result<Value, Error> {
         let mut buf = [0u8; 4];
-        self.0
+        self.socket
             .read_exact(&mut buf)
             .map_err(Error::ReceiveResponseHeader)?;
         let len = u32::from_le_bytes(buf);
         // This should always be a safe cast assuming we aren't running on a <16-bit CPU.
         let mut buf = vec![0u8; len as usize];
-        self.0
+        self.socket
             .read_exact(&mut buf)
-            .map_err(Error::ReceiveResponse)?;
-        serde_json::from_slice(&buf).map_err(Error::DeserializeResponse)
+            .map_err(Error::ReceiveMessage)?;
+        log::trace!(
+            "wayfire_watcher: received response: {:?}",
+            str::from_utf8(buf.as_slice())
+        );
+        serde_json::from_slice(&buf).map_err(Error::DeserializeMessage)
     }
 }
 
 impl<W: Write> WFSocket<W> {
     fn send_request(&mut self, message: &impl Serialize) -> Result<(), Error> {
-        let message_bytes = serde_json::to_vec(message).map_err(Error::SerializeRequest)?;
-        self.0
+        let message_bytes = serde_json::to_string(message).map_err(Error::SerializeRequest)?;
+        self.socket
             .write_all(
                 &u32::try_from(message_bytes.len())
                     .map_err(Error::SerializeRequestHeader)?
                     .to_le_bytes(),
             )
             .map_err(Error::SendRequestHeader)?;
-        self.0
-            .write_all(message_bytes.as_slice())
+        log::trace!("wayfire_watcher: received response: {}", message_bytes);
+        self.socket
+            .write_all(message_bytes.as_ref())
             .map_err(Error::SendRequest)?;
-        self.0.flush().map_err(Error::FlushRequest)
+        self.socket.flush().map_err(Error::FlushRequest)
     }
 }
 
@@ -125,10 +178,8 @@ pub struct Request<D: Serialize> {
 // For some reason it's really hard to add Deserialize as a trait bound.
 // It errors out if it's incorrect anyway though. Guess we're being zig now.
 #[derive(Deserialize, Debug)]
-pub struct Response<D: Default> {
+pub struct CompositorResult {
     result: String,
-    #[serde(default)]
-    info: D,
 }
 
 pub fn spawn(registry: BindingRegistry) {
@@ -140,7 +191,7 @@ pub fn spawn(registry: BindingRegistry) {
         sock.as_ref().display()
     );
     UnixStream::connect(sock.as_ref())
-        .map(WFSocket)
+        .map(WFSocket::new)
         .map(|mut event_socket| {
             const WATCH_COMMAND: &'static str = "window-rules/events/watch";
             const WATCH_EVENTS: &[EventKind] = &[
@@ -159,10 +210,10 @@ pub fn spawn(registry: BindingRegistry) {
                 })
                 .unwrap_or_else(|error| log::error!("wayfire_watcher: request watch: {error}"));
             event_socket
-                .receive_response::<Response<()>>()
+                .receive_response::<CompositorResult>()
                 .map(|resp| {
                     if resp.result != "ok" {
-                        log::error!("wayfire_watcher: compositor response: {}", resp.result)
+                        log::error!("wayfire_watcher: compositor result: {}", resp.result)
                     } else {
                         thread::spawn(move || run_loop(event_socket, registry));
                     }
@@ -182,18 +233,13 @@ fn get_views(event_socket: &mut WFSocket<impl Read + Write>) -> Result<Vec<View>
         method: "window-rules/list-views",
         data: Map::default(),
     })?;
-    let message = event_socket.receive_response::<Response<Vec<View>>>()?;
-    if message.result != "ok" {
-        Err(Error::CompositorResponse(message.result.to_string()))
-    } else {
-        Ok(message.info)
-    }
+    event_socket.receive_response::<Vec<View>>()
 }
 
 fn run_loop(mut event_socket: WFSocket<impl Read + Write>, registry: BindingRegistry) {
     loop {
         event_socket
-            .receive_response::<Event>()
+            .receive_event()
             .map(|_| {
                 get_views(&mut event_socket)
                     .map(|views| {
@@ -290,10 +336,8 @@ pub fn test_deserialize_response() {
     const EXAMPLE_MESSAGE_BYTES: &[u8] = EXAMPLE_MESSAGE.as_bytes();
     const EXAMPLE_MESSAGE_SIZE: u32 = EXAMPLE_MESSAGE.len() as u32;
     const EXAMPLE_MESSAGE_SIZE_BYTES: &[u8] = &EXAMPLE_MESSAGE_SIZE.to_le_bytes();
-    let mut reader = WFSocket(&mut EXAMPLE_MESSAGE_SIZE_BYTES.chain(EXAMPLE_MESSAGE_BYTES));
-    let message = reader
-        .receive_response::<Event>()
-        .expect("failed to receive message");
+    let mut reader = WFSocket::new(&mut EXAMPLE_MESSAGE_SIZE_BYTES.chain(EXAMPLE_MESSAGE_BYTES));
+    let message = reader.receive_event().expect("failed to receive message");
     assert_eq!(
         message,
         Event {
