@@ -1,8 +1,9 @@
 use crate::watcher::BindingRegistry;
 use crate::OutputBinding;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::num::TryFromIntError;
@@ -12,7 +13,8 @@ use std::sync::Arc;
 use std::{io, thread};
 use thiserror::Error;
 use waywallen_display::{
-    WAYWALLEN_WIN_HAS_ACTIVE, WAYWALLEN_WIN_HAS_FULLSCREEN, WAYWALLEN_WIN_HAS_NON_MINIMIZED,
+    WAYWALLEN_WIN_HAS_ACTIVE, WAYWALLEN_WIN_HAS_FULLSCREEN, WAYWALLEN_WIN_HAS_MAXIMIZED,
+    WAYWALLEN_WIN_HAS_NON_MINIMIZED,
 };
 
 #[derive(Error, Debug)]
@@ -110,8 +112,8 @@ impl<W: Read> WFSocket<W> {
             .read_exact(&mut buf)
             .map_err(Error::ReceiveMessage)?;
         log::trace!(
-            "wayfire_watcher: received response: {:?}",
-            str::from_utf8(buf.as_slice())
+            "wayfire_watcher: received response: {}",
+            String::from_utf8_lossy(buf.as_slice())
         );
         serde_json::from_slice(&buf).map_err(Error::DeserializeMessage)
     }
@@ -160,9 +162,65 @@ pub struct View {
     minimized: bool,
     // maximized: bool,
     fullscreen: bool,
+    #[serde(rename = "output-id")]
+    output_id: u32,
     #[serde(rename = "output-name")]
     output_name: String,
     activated: bool,
+    #[serde(rename = "tiled-edges")]
+    tiled_edges: u32,
+    #[serde(rename = "bbox")]
+    bounding_box: BoundingBox,
+    #[serde(deserialize_with = "is_toplevel", rename = "type")]
+    toplevel: bool,
+    mapped: bool
+}
+
+pub fn is_toplevel<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    Ok(match String::deserialize(deserializer)?.as_str() {
+        "toplevel" => true,
+        _ => false,
+    })
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+pub struct BoundingBox {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+// This is a bitmask. 1111 = all 4 corners tiled.
+const ALL_CORNERS_TILED: u32 = 15;
+
+#[derive(Serialize, Debug)]
+pub struct OutputID {
+    id: u32,
+}
+
+#[derive(Deserialize, Copy, Clone, Debug)]
+pub struct Output {
+    geometry: Resolution,
+}
+
+impl Output {
+    pub fn is_colliding(&self, view: &View) -> bool {
+        log::debug!(
+            "wayfire_watcher: calculating collision workspace {}x{} view {} ({},{}) ({}x{})",
+            self.geometry.width,
+            self.geometry.height,
+            view.id,
+            view.bounding_box.x,      // 1010
+            view.bounding_box.y,      // 298
+            view.bounding_box.width,  // 800
+            view.bounding_box.height  // 600
+        );
+        view.bounding_box.x + view.bounding_box.width > 0.0 // the left of the view > the right of the workspace
+        && view.bounding_box.x < self.geometry.width // the right of the view < the left of the workspace
+        && view.bounding_box.y + view.bounding_box.height > 0.0 // the bottom of the view > the top of the workspace
+        && view.bounding_box.y < self.geometry.height // the top of the view < the bottom of the workspace
+    }
 }
 
 #[derive(Deserialize, Debug, PartialEq)]
@@ -171,17 +229,21 @@ pub struct Event {
     view: Option<View>,
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug)]
 pub struct Request<D: Serialize> {
     method: &'static str,
     data: D,
 }
 
-// For some reason it's really hard to add Deserialize as a trait bound.
-// It errors out if it's incorrect anyway though. Guess we're being zig now.
 #[derive(Deserialize, Debug)]
 pub struct CompositorResult {
     result: String,
+}
+
+#[derive(Deserialize, Copy, Clone, Debug)]
+pub struct Resolution {
+    width: f64,
+    height: f64,
 }
 
 pub fn spawn(registry: BindingRegistry) {
@@ -235,7 +297,15 @@ fn get_views(event_socket: &mut WFSocket<impl Read + Write>) -> Result<Vec<View>
         method: "window-rules/list-views",
         data: Map::default(),
     })?;
-    event_socket.receive_response::<Vec<View>>()
+    event_socket.receive_response()
+}
+
+fn get_output(event_socket: &mut WFSocket<impl Read + Write>, id: u32) -> Result<Output, Error> {
+    event_socket.send_request(&Request {
+        method: "window-rules/output-info",
+        data: OutputID { id },
+    })?;
+    event_socket.receive_response()
 }
 
 fn run_loop(mut event_socket: WFSocket<impl Read + Write>, registry: BindingRegistry) {
@@ -248,6 +318,7 @@ fn run_loop(mut event_socket: WFSocket<impl Read + Write>, registry: BindingRegi
                         registry
                             .lock()
                             .map(|registry| {
+                                let mut output_cache: HashMap<u32, Output> = HashMap::new();
                                 let mut display_flags: HashMap<
                                     &String,
                                     (u32, &Arc<OutputBinding>),
@@ -256,25 +327,45 @@ fn run_loop(mut event_socket: WFSocket<impl Read + Write>, registry: BindingRegi
                                     .map(|(display_name, output)| (display_name, (0, output)))
                                     .collect();
                                 for view in views {
-                                    if view.minimized {
+                                    if view.minimized || !view.toplevel || !view.mapped {
                                         continue;
                                     }
-                                    if let Some((flags, _)) =
-                                        display_flags.get_mut(&view.output_name)
-                                    {
-                                        *flags |= WAYWALLEN_WIN_HAS_NON_MINIMIZED;
-                                        if view.activated {
-                                            *flags |= WAYWALLEN_WIN_HAS_ACTIVE
+                                    let Some((flags, _)) = display_flags.get_mut(&view.output_name)
+                                    else {
+                                        continue;
+                                    };
+                                    let entry = output_cache.entry(view.output_id);
+                                    let output = if let Entry::Occupied(entry) = entry {
+                                        *entry.get()
+                                    } else {
+                                        match get_output(&mut event_socket, view.output_id) {
+                                            Ok(output) => *entry.insert_entry(output).get(),
+                                            Err(error) => {
+                                                log::debug!(
+                                                    "wayfire_watcher: get output {}: {error}",
+                                                    view.output_name
+                                                );
+                                                continue;
+                                            }
                                         }
-                                        // TODO: Waiting on https://github.com/WayfireWM/wayfire/issues/3058
-                                        /*
-                                        if view.maximized {
-                                            *display |= WAYWALLEN_WIN_HAS_MAXIMIZED
-                                        }
-                                        */
-                                        if view.fullscreen {
-                                            *flags |= WAYWALLEN_WIN_HAS_FULLSCREEN
-                                        }
+                                    };
+                                    let colliding = output.is_colliding(&view);
+                                    log::debug!(
+                                        "wayfire_watcher: view {} colliding: {colliding}",
+                                        view.id
+                                    );
+                                    if !colliding {
+                                        continue;
+                                    }
+                                    *flags |= WAYWALLEN_WIN_HAS_NON_MINIMIZED;
+                                    if view.activated {
+                                        *flags |= WAYWALLEN_WIN_HAS_ACTIVE
+                                    }
+                                    if view.tiled_edges == ALL_CORNERS_TILED {
+                                        *flags |= WAYWALLEN_WIN_HAS_MAXIMIZED
+                                    }
+                                    if view.fullscreen {
+                                        *flags |= WAYWALLEN_WIN_HAS_FULLSCREEN
                                     }
                                 }
                                 for (flags, output) in display_flags.values() {
@@ -367,8 +458,18 @@ pub fn test_deserialize_response() {
                 id: 11,
                 minimized: false,
                 fullscreen: false,
+                output_id: 1,
                 output_name: "WL-1".to_string(),
                 activated: true,
+                tiled_edges: 0,
+                bounding_box: BoundingBox {
+                    x: 36.0,
+                    y: 128.0,
+                    width: 844.0,
+                    height: 673.0,
+                },
+                toplevel: true,
+                mapped: true,
             }),
         }
     )
